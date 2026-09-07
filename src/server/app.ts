@@ -19,16 +19,30 @@ const DEFAULT_CLIENT_SCRIPT = `(function () {
   if (window.__REVERSE_LOGGER_INITIALIZED__) return;
   window.__REVERSE_LOGGER_INITIALIZED__ = true;
 
-  function getServerOrigin() {
-    if (document.currentScript && document.currentScript.src) {
-      try { return new URL(document.currentScript.src).origin; } catch (e) {}
+  function getScriptConfig() {
+    var origin = window.location.origin;
+    var token;
+    if (document.currentScript) {
+      var el = document.currentScript;
+      if (el.src) {
+        try {
+          var parsed = new URL(el.src);
+          origin = parsed.origin;
+          var t = parsed.searchParams.get('token');
+          if (t) token = t;
+        } catch (e) {}
+      }
+      var dt = el.getAttribute('data-token');
+      if (dt) token = dt;
     }
-    return window.location.origin;
+    return { origin: origin, token: token };
   }
 
-  var serverOrigin = getServerOrigin();
-  var apiEndpoint = serverOrigin + '/api/logs';
+  var cfg = getScriptConfig();
+  var apiEndpoint = cfg.origin + '/api/logs';
+  var authToken = cfg.token;
   var isSending = false;
+  var queue = [];
 
   function safeSerialize(obj) {
     var cache = new WeakSet();
@@ -50,47 +64,29 @@ const DEFAULT_CLIENT_SCRIPT = `(function () {
     }));
   }
 
-  function extractStack(args) {
-    for (var i = 0; i < args.length; i++) {
-      if (args[i] instanceof Error && args[i].stack) return args[i].stack;
-    }
-    var err = new Error();
-    if (err.stack) {
-      return err.stack.split('\\n').filter(function (l) {
-        return !l.includes('client.js') && !l.includes('safeSerialize');
-      }).join('\\n');
-    }
-    return undefined;
-  }
-
   function sendLog(level, rawArgs) {
-    if (isSending) return;
-    isSending = true;
     try {
       var serializedArgs = rawArgs.map(safeSerialize);
-      var stack = extractStack(rawArgs);
       var payload = {
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
         level: level,
         args: serializedArgs,
         url: typeof window !== 'undefined' ? window.location.href : '',
-        stack: stack,
         userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : ''
       };
+      var headers = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+
       if (typeof fetch === 'function') {
         fetch(apiEndpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: headers,
           body: JSON.stringify(payload),
           mode: 'cors',
           keepalive: true
-        }).catch(function () {}).finally(function () { isSending = false; });
-      } else {
-        isSending = false;
+        }).catch(function () {});
       }
-    } catch (e) {
-      isSending = false;
-    }
+    } catch (e) {}
   }
 
   var levels = ['log', 'info', 'warn', 'error', 'debug'];
@@ -99,7 +95,7 @@ const DEFAULT_CLIENT_SCRIPT = `(function () {
       var orig = console[level].bind(console);
       console[level] = function () {
         var args = Array.prototype.slice.call(arguments);
-        orig.apply(console, args);
+        try { orig.apply(console, args); } catch (e) {}
         sendLog(level, args);
       };
     }
@@ -121,17 +117,49 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
   const app = fastify({ logger: false });
   const db = new LoggerDatabase(options.dbPath);
   const events = new EventEmitter();
-  const maxLogs = options.maxLogs || 10000;
+  const maxLogs = options.maxLogs ?? 10000;
+  const token = options.token;
 
-  // Enable CORS for all browser clients
+  // Register CORS
   app.register(cors, {
     origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS', 'HEAD'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   });
+
+  // Token Authentication Middleware
+  if (token) {
+    app.addHook('onRequest', async (request, reply) => {
+      const urlPath = request.url.split('?')[0];
+
+      // Skip authentication for client script
+      if (urlPath === '/script/client.js' || urlPath === '/' || request.method === 'OPTIONS') {
+        return;
+      }
+
+      // Check Authorization header or query parameter
+      const authHeader = request.headers.authorization;
+      const queryToken = (request.query as Record<string, string>).token;
+
+      let providedToken: string | undefined;
+      if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+        providedToken = authHeader.substring(7).trim();
+      } else if (queryToken) {
+        providedToken = queryToken;
+      }
+
+      if (!providedToken || providedToken !== token) {
+        reply.status(401);
+        return reply.send({ error: 'Unauthorized' });
+      }
+    });
+  }
 
   // Serve browser client script
   app.get('/script/client.js', async (request, reply) => {
     reply.type('application/javascript');
-    
+
     const currentDir = getDirname();
     const clientPaths = [
       path.join(currentDir, 'client.js'),
@@ -159,26 +187,35 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
   app.get('/api/logs', async (request, reply) => {
     const query = request.query as Record<string, string>;
     const limit = query.limit ? parseInt(query.limit, 10) : 20;
+    const offset = query.offset ? parseInt(query.offset, 10) : 0;
     const since = query.since ? parseInt(query.since, 10) : undefined;
     const until = query.until ? parseInt(query.until, 10) : undefined;
+    const from = query.from || since;
+    const to = query.to || until;
     const level = query.level as LogLevel | undefined;
     const search = query.search || query.q || undefined;
+    const urlFilter = query.url || undefined;
+    const sessionId = query.sessionId || query.session_id || undefined;
 
     const queryOptions = {
       limit,
-      since,
-      until,
+      offset,
+      from,
+      to,
       level,
       search,
+      url: urlFilter,
+      sessionId,
     };
 
     const logs = db.getLogs(queryOptions);
+    const total = db.getLogCount(queryOptions);
 
     return {
-      success: true,
-      count: logs.length,
-      total: db.getLogCount(queryOptions),
       logs,
+      total,
+      limit,
+      offset,
     };
   });
 
@@ -191,17 +228,19 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
       return { success: false, error: 'Invalid log payload' };
     }
 
-    const level: LogLevel = body.level && ['log', 'info', 'warn', 'error', 'debug'].includes(body.level)
-      ? body.level
+    const level = body.level && ['log', 'info', 'warn', 'error', 'debug'].includes(body.level.toLowerCase())
+      ? body.level.toLowerCase()
       : 'info';
 
-    const entry: LogEntry = {
-      timestamp: body.timestamp || Date.now(),
+    const entry: Partial<LogEntry> = {
+      timestamp: body.timestamp || new Date().toISOString(),
       level,
+      message: body.message,
       args: Array.isArray(body.args) ? body.args : [body.args ?? ''],
       url: body.url || (request.headers.referer || request.headers.origin as string) || '',
       stack: body.stack,
       userAgent: body.userAgent || (request.headers['user-agent'] as string) || '',
+      sessionId: body.sessionId,
     };
 
     const inserted = db.insertLog(entry, maxLogs);
@@ -217,7 +256,7 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
     app,
     db,
     events,
-    listen: async (port: number, host: string = '0.0.0.0') => {
+    listen: async (port: number, host: string = options.host || '0.0.0.0') => {
       return await app.listen({ port, host });
     },
     close: async () => {

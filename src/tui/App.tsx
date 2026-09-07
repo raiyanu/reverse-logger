@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput, useApp } from 'ink';
 import { EventEmitter } from 'node:events';
-import { LogEntry, LogLevel } from '../types';
+import { LogEntry } from '../types';
 import { LoggerDatabase } from '../server/db';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface AppProps {
   serverUrl: string;
@@ -13,7 +14,7 @@ interface AppProps {
   onQuit?: () => void;
 }
 
-const levelColors: Record<LogLevel, string> = {
+const levelColors: Record<string, string> = {
   log: 'green',
   info: 'cyan',
   warn: 'yellow',
@@ -34,6 +35,13 @@ export const App: React.FC<AppProps> = ({
   const [totalCount, setTotalCount] = useState<number>(0);
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [filterLevel, setFilterLevel] = useState<string>('ALL');
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  const isPausedRef = useRef(isPaused);
+  isPausedRef.current = isPaused;
+
+  const scriptTagText = `<script src="${scriptUrl}"></script>`;
 
   // Initial load
   useEffect(() => {
@@ -45,8 +53,10 @@ export const App: React.FC<AppProps> = ({
   // Subscribe to live log events
   useEffect(() => {
     const handleNewLog = (newLog: LogEntry) => {
-      setLogs((prev) => [newLog, ...prev].slice(0, 200));
       setTotalCount((prev) => Math.min(prev + 1, maxLogs));
+      if (!isPausedRef.current) {
+        setLogs((prev) => [newLog, ...prev].slice(0, 200));
+      }
     };
 
     events.on('log', handleNewLog);
@@ -55,17 +65,51 @@ export const App: React.FC<AppProps> = ({
     };
   }, [events, maxLogs]);
 
+  // Auto-clear status message after 3 seconds
+  useEffect(() => {
+    if (statusMessage) {
+      const timer = setTimeout(() => {
+        setStatusMessage(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [statusMessage]);
+
   // Filter logs by level if selected
   const filteredLogs = logs.filter((log) => {
     if (filterLevel === 'ALL') return true;
     return log.level.toUpperCase() === filterLevel;
   });
 
-  // Key navigation
+  // Key navigation & action controls
   useInput((input, key) => {
-    if (input === 'q' || key.escape) {
+    const lowerInput = input ? input.toLowerCase() : '';
+
+    if (lowerInput === 'q' || key.escape) {
       if (onQuit) onQuit();
       exit();
+      return;
+    }
+
+    if (lowerInput === 'c') {
+      const ok = copyToClipboard(scriptUrl);
+      setStatusMessage(ok ? '✓ Copied Script URL to clipboard' : '⚠ Failed to copy Script URL');
+      return;
+    }
+
+    if (lowerInput === 't') {
+      const ok = copyToClipboard(scriptTagText);
+      setStatusMessage(ok ? '✓ Copied Script Tag to clipboard' : '⚠ Failed to copy Script Tag');
+      return;
+    }
+
+    if (lowerInput === 'p') {
+      setIsPaused((prev) => {
+        const next = !prev;
+        setStatusMessage(next ? '⏸ Live logs PAUSED' : '▶ Live logs RESUMED');
+        return next;
+      });
+      return;
     }
 
     if (key.downArrow) {
@@ -91,13 +135,18 @@ export const App: React.FC<AppProps> = ({
       <Box
         flexDirection="column"
         borderStyle="round"
-        borderColor="cyan"
+        borderColor={isPaused ? 'yellow' : 'cyan'}
         paddingX={1}
         marginBottom={1}
       >
-        <Text bold color="cyan">
-          ⚡ REVERSE LOGGER SERVER
-        </Text>
+        <Box justifyContent="space-between">
+          <Text bold color="cyan">
+            ⚡ REVERSE LOGGER SERVER
+          </Text>
+          <Text bold color={isPaused ? 'yellow' : 'green'}>
+            {isPaused ? '[PAUSED]' : '[LIVE]'}
+          </Text>
+        </Box>
         <Box marginTop={1}>
           <Text bold>Server: </Text>
           <Text color="green">{serverUrl}</Text>
@@ -107,24 +156,29 @@ export const App: React.FC<AppProps> = ({
           <Text color="green">{scriptUrl}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text bold>Tag: </Text>
-          <Text color="yellow">
-            {`<script src="${scriptUrl}"></script>`}
-          </Text>
-        </Box>
-        <Box marginTop={1}>
           <Text color="gray">
             Logs Stored: {totalCount} / {maxLogs} max
           </Text>
         </Box>
       </Box>
 
+      {/* Action Notification Message */}
+      {statusMessage && (
+        <Box marginBottom={1} paddingX={1} borderStyle="single" borderColor="magenta">
+          <Text bold color="magenta">
+            {statusMessage}
+          </Text>
+        </Box>
+      )}
+
       {/* Controls & Filter Bar */}
       <Box marginBottom={1} justifyContent="space-between">
         <Text bold>
           Filter: [{filterLevel}] (1:ALL 2:LOG 3:INFO 4:WARN 5:ERR)
         </Text>
-        <Text color="gray">Use ↑/↓ to navigate | Press 'q' to quit</Text>
+        <Text color="gray">
+          Controls: <Text bold color="yellow">c</Text>=copy url | <Text bold color="yellow">t</Text>=copy tag | <Text bold color="yellow">p</Text>=pause | <Text bold color="yellow">q</Text>=quit
+        </Text>
       </Box>
 
       {/* Live Logs View */}
@@ -134,9 +188,15 @@ export const App: React.FC<AppProps> = ({
         ) : (
           filteredLogs.slice(0, 10).map((log, index) => {
             const isSelected = index === selectedIndex;
-            const timeStr = new Date(log.timestamp).toLocaleTimeString();
-            const levelUpper = log.level.toUpperCase().padEnd(5);
-            const argsPreview = log.args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
+            let timeStr = log.timestamp;
+            try {
+              timeStr = new Date(log.timestamp).toLocaleTimeString();
+            } catch {
+              // fallback
+            }
+
+            const levelUpper = (log.level || 'info').toUpperCase().padEnd(5);
+            const msgPreview = log.message || log.args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
 
             return (
               <Box key={log.id || index}>
@@ -147,7 +207,7 @@ export const App: React.FC<AppProps> = ({
                 <Text color={levelColors[log.level] || 'white'} bold>
                   [{levelUpper}]{' '}
                 </Text>
-                <Text wrap="truncate-end">{argsPreview}</Text>
+                <Text wrap="truncate-end">{msgPreview}</Text>
               </Box>
             );
           })
@@ -167,9 +227,16 @@ export const App: React.FC<AppProps> = ({
             Log Inspector (#{selectedLog.id})
           </Text>
           <Text color="gray">URL: {selectedLog.url || 'N/A'}</Text>
-          <Text color="gray">Time: {new Date(selectedLog.timestamp).toISOString()}</Text>
+          <Text color="gray">Session ID: {selectedLog.sessionId || 'N/A'}</Text>
+          <Text color="gray">Time: {selectedLog.timestamp}</Text>
           <Box marginTop={1}>
             <Text bold color={levelColors[selectedLog.level] || 'white'}>
+              Message:
+            </Text>
+          </Box>
+          <Text color="white">{selectedLog.message}</Text>
+          <Box marginTop={1}>
+            <Text bold color="cyan">
               Arguments:
             </Text>
           </Box>

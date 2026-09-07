@@ -5,15 +5,17 @@
 ## Features
 
 - 🚀 **Zero Config CLI**: Run `npx reverse-logger serve` to start instantly.
-- 📱 **Live Terminal UI**: Built with [Ink](https://github.com/vadimdemedes/ink) to display live colored logs, server banner, and inspection view.
-- 🗄️ **Local SQLite Storage**: Saves logs in `~/.reverse-logger/logs.db` using `better-sqlite3` with customizable max log retention.
-- 🌐 **Auto Network & Port Detection**: Detects your machine's LAN IP and finds the first available port starting at `5050`.
-- 🔌 **Standalone Browser Client**: Served via `/script/client.js` with automatic server discovery and console proxying (`console.log`, `info`, `warn`, `error`, `debug`).
-- ⚡ **Fastify API**: High-performance HTTP server supporting time-range log queries and RESTful POST log ingestion.
+- 📱 **Live Terminal UI & Terminal Banner**: Plain text banner on startup for standard terminal text selection, plus live Ink TUI with keyboard controls (`c` to copy script URL, `t` to copy script tag, `p` to pause/resume, `q` to quit, `↑`/`↓` to scroll).
+- 🗄️ **Local SQLite Storage**: Saves logs in `~/.reverse-logger/logs.db` (`better-sqlite3`) with configurable retention limit (`--max-logs`). Indexed by timestamp, level, and sessionId.
+- 🌐 **Auto Network & Port Detection**: Detects LAN IP and picks first available port starting from `5050`.
+- 🔑 **Optional Token Auth**: Secure log API with `--token <secret>` (or config `"token"`).
+- 🛡️ **Hardened Browser Client**: Standalone dependency-free `/script/client.js` with session tracking (`sessionId`), circular reference handling, payload size limits, and an offline retry queue (flushes when server recovers).
+- ⚙️ **Config File Support**: Global configuration support at `~/.reverse-logger/config.json`.
+- ⚡ **Advanced Filtering & Pagination**: Filter logs by `search`/`q`, `level`, `url`, `sessionId`, ISO `from`/`to` time ranges, `limit`, and `offset`.
 
 ## Installation & Quick Start
 
-Run directly using `npx`:
+Run directly via `npx`:
 
 ```bash
 npx reverse-logger serve
@@ -26,128 +28,161 @@ npm install -g reverse-logger
 reverse-logger serve
 ```
 
-Or add to your project:
+## CLI Usage & Options
 
 ```bash
-npm install --save-dev reverse-logger
+reverse-logger serve [options]
 ```
 
-## CLI Usage
+### Options
 
-Start reverse logger server:
+| Option | Description | Default |
+| --- | --- | --- |
+| `--max-logs <number>` | Maximum logs to retain in local SQLite database | `10000` |
+| `--port <number>` | Starting port number to bind server | `5050` |
+| `--host <string>` | Host interface address | `0.0.0.0` |
+| `--token <string>` | Optional Bearer authentication token for API access | `undefined` |
 
-```bash
-reverse-logger serve
-```
+### Startup Output
 
-Configure maximum log retention limit (default: 10000):
-
-```bash
-reverse-logger serve --max-logs 5000
-```
-
-Specify custom starting port (default: 5050):
-
-```bash
-reverse-logger serve --port 8080
-```
-
-When started, the CLI will output:
+When starting, plain text banner is printed to standard output for easy mouse selection:
 
 ```text
-Server: http://192.168.1.15:5050
-Script: http://192.168.1.15:5050/script/client.js
+Reverse Logger
+
+Server : http://192.168.1.15:5050
+Script : http://192.168.1.15:5050/script/client.js
 
 Tag:
 <script src="http://192.168.1.15:5050/script/client.js"></script>
 ```
 
-Add the `<script>` tag to any web application to start capturing logs.
+### TUI Keyboard Controls
+
+While the TUI is active in terminal:
+
+- `c`: Copy script URL to system clipboard
+- `t`: Copy script `<script>` tag to system clipboard
+- `p`: Pause / resume live log updates
+- `q`: Quit server and exit
+- `↑` / `↓`: Scroll log entries list
+- `1` - `5`: Level filter shortcuts (1:ALL, 2:LOG, 3:INFO, 4:WARN, 5:ERR)
+
+## Configuration File (`~/.reverse-logger/config.json`)
+
+You can save default configurations in `~/.reverse-logger/config.json`:
+
+```json
+{
+  "maxLogs": 10000,
+  "port": 5050,
+  "host": "0.0.0.0",
+  "token": "my_secret_token"
+}
+```
+
+*Note: CLI flags always take precedence over configuration file values.*
+
+## Log Schema
+
+Log entries adhere to the standardized structure:
+
+```typescript
+interface LogEntry {
+  id: number;
+  timestamp: string;     // ISO 8601 string (e.g., "2026-09-07T18:00:00.000Z")
+  level: string;         // "log" | "info" | "warn" | "error" | "debug"
+  message: string;       // Primary text representation of console arguments
+  args: unknown[];       // Raw arguments array
+  url?: string;          // Origin page URL
+  stack?: string;        // Error stack trace (if available)
+  userAgent?: string;    // Browser user agent
+  sessionId?: string;    // Unique browser session ID
+  createdAt?: string;    // Server ingestion timestamp
+}
+```
 
 ## API Endpoints
 
-### 1. Browser Client Script
+### 1. Standalone Client Script
 
 ```text
 GET /script/client.js
 ```
-Serves the standalone browser console interceptor script.
+Serves the dependency-free browser client proxy script. When `--token` is active, the script automatically extracts `?token=YOUR_TOKEN` from its script tag `src` attribute.
 
-### 2. Retrieve Stored Logs
+### 2. Retrieve Logs with Combined Filtering & Pagination
 
 ```text
 GET /api/logs
 ```
-Query parameters:
-- `limit` (default: `20`) - Number of logs to retrieve.
-- `search` / `q` (string) - Search text within log arguments, URL, or stack traces.
-- `since` (timestamp in ms) - Return logs after this timestamp.
-- `until` (timestamp in ms) - Return logs before this timestamp.
-- `level` (`log` | `info` | `warn` | `error` | `debug`) - Filter by log level.
 
-Example response:
+#### Query Parameters
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `level` | `string` | Filter by level (`log`, `info`, `warn`, `error`, `debug`) |
+| `search` / `q` | `string` | Substring search across message, arguments, URL, or stack |
+| `url` | `string` | Partial or exact URL filter |
+| `from` | `string` / `number` | Start ISO timestamp or time ms |
+| `to` | `string` / `number` | End ISO timestamp or time ms |
+| `limit` | `number` | Result limit (default: `20`) |
+| `offset` | `number` | Result offset for pagination (default: `0`) |
+
+#### Example Query
+
+```text
+GET /api/logs?q=auth&level=error&url=example.com&limit=10&offset=0
+```
+
+#### Example Response
+
 ```json
 {
-  "success": true,
-  "count": 1,
-  "total": 42,
   "logs": [
     {
-      "id": 1,
-      "timestamp": 1725730000000,
+      "id": 42,
+      "timestamp": "2026-09-07T18:15:00.000Z",
       "level": "error",
-      "args": ["Failed to load resource", { "status": 404 }],
-      "url": "http://localhost:3000/checkout",
-      "stack": "Error: Failed to load resource\n    at fetchData (http://localhost:3000/app.js:42:12)",
+      "message": "Auth failed: Invalid credentials",
+      "args": ["Auth failed: Invalid credentials", { "code": 401 }],
+      "url": "http://example.com/auth",
+      "stack": "Error: Auth failed\n    at login (http://example.com/app.js:10:5)",
       "userAgent": "Mozilla/5.0...",
-      "createdAt": 1725730000000
+      "sessionId": "s_a1b2c3d4e",
+      "createdAt": "2026-09-07T18:15:00.100Z"
     }
-  ]
+  ],
+  "total": 1,
+  "limit": 10,
+  "offset": 0
 }
 ```
 
-### 3. Send Logs Programmatically
+### 3. Ingest Log Entry
 
 ```text
 POST /api/logs
 ```
-Payload:
+
+Requires `Authorization: Bearer <token>` or `?token=<token>` when authentication is enabled.
+
 ```json
 {
   "level": "warn",
-  "args": ["User token expired"],
+  "message": "High memory usage detected",
+  "args": ["High memory usage detected"],
   "url": "http://localhost:3000/dashboard",
-  "timestamp": 1725730000000
+  "sessionId": "s_a1b2c3d4e"
 }
 ```
 
-## Storage Location
+## Running Tests
 
-Database is automatically initialized at:
-```text
-~/.reverse-logger/logs.db
-```
+Run the comprehensive test suite covering search, level, URL, combined filters, pagination, ISO time ranges, authentication, CORS, retention limits, payload limits, and malformed request handling:
 
-Records beyond `--max-logs` are automatically truncated to prevent unlimited disk growth.
-
-## Programmatic API
-
-You can also start `reverse-logger` programmatically inside Node.js scripts:
-
-```typescript
-import { createServer, findAvailablePort, getLanIp } from 'reverse-logger';
-
-async function run() {
-  const port = await findAvailablePort(5050);
-  const ip = getLanIp();
-  
-  const server = createServer({ maxLogs: 1000 });
-  await server.listen(port);
-
-  console.log(`Server listening on http://${ip}:${port}`);
-}
-
-run();
+```bash
+npm test
 ```
 
 ## License
