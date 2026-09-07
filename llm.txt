@@ -2,6 +2,14 @@
 
 `reverse-logger` is a local reverse logger server and browser console monitor. It captures browser console activity and application events in real time, displaying them in a live terminal UI, an in-browser developer overlay, and an interactive web dashboard.
 
+### 🤖 AI Agent Skill (`skills.sh`)
+
+Install into your AI Coding Assistant via `skills.sh`:
+
+```bash
+npx skills add raiyanu/reverse-logger
+```
+
 ---
 
 ## 1. Installation & Starting the Server
