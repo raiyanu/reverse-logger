@@ -1,4 +1,5 @@
-export type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
+export type LogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug' | 'special';
+export type LogSource = 'console' | 'reverseLogger';
 
 export interface LogEntry {
   id?: number;
@@ -10,6 +11,8 @@ export interface LogEntry {
   stack?: string;
   userAgent?: string;
   sessionId?: string;
+  starred: boolean;
+  source?: LogSource;
   createdAt?: string;
 }
 
@@ -24,6 +27,8 @@ export interface RawLogRecord {
   stack: string | null;
   user_agent: string | null;
   session_id: string | null;
+  starred: number; // 0 or 1
+  source: string | null;
   created_at: string;
 }
 
@@ -54,6 +59,8 @@ export interface LogQueryOptions {
   search?: string;
   url?: string;
   sessionId?: string;
+  starred?: boolean;
+  source?: LogSource;
 }
 
 export interface LogResponsePayload {

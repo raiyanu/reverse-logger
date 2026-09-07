@@ -1,6 +1,6 @@
 {
   "name": "reverse-logger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local reverse logger server receiving browser console logs with TUI and SQLite storage",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -15,7 +15,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "reverse-logger": "./dist/cli.mjs"
+    "reverse-logger": "./dist/cli.js"
   },
   "files": [
     "dist"
@@ -25,6 +25,7 @@
     "dev": "tsup --watch",
     "lint": "tsc --noEmit",
     "test": "tsx test/index.test.ts",
+    "prepublishOnly": "npm run lint && npm run build && npm test",
     "changeset": "changeset"
   },
   "keywords": [

@@ -1,17 +1,18 @@
 # reverse-logger ⚡
 
-> Production-ready local reverse logger server that receives browser console logs and displays/stores them in a live terminal UI with SQLite database.
+> Production-ready local reverse logger server that receives browser console logs and displays/stores them in a live terminal UI, standalone browser developer overlay, and web dashboard with SQLite database.
 
 ## Features
 
 - 🚀 **Zero Config CLI**: Run `npx reverse-logger serve` to start instantly.
-- 📱 **Live Terminal UI & Terminal Banner**: Plain text banner on startup for standard terminal text selection, plus live Ink TUI with keyboard controls (`c` to copy script URL, `t` to copy script tag, `p` to pause/resume, `q` to quit, `↑`/`↓` to scroll).
-- 🗄️ **Local SQLite Storage**: Saves logs in `~/.reverse-logger/logs.db` (`better-sqlite3`) with configurable retention limit (`--max-logs`). Indexed by timestamp, level, and sessionId.
-- 🌐 **Auto Network & Port Detection**: Detects LAN IP and picks first available port starting from `5050`.
+- 🎨 **Browser Developer Overlay**: Lightweight Shadow DOM overlay injected by `/script/client.js` with floating badge (`RL 12 ⚠ 2 ✕ 1`), real-time log list, search, level filtering, expandable log details, and copy buttons.
+- ⭐ **Starred & Special Logs API**: Public `window.reverseLogger.star(message, ...args)` API to mark important events (`level: "special"`, `starred: true`, `source: "reverseLogger"`). Star state is persisted locally and on server.
+- 📊 **Web Dashboard**: Responsive web page served at `http://localhost:5050/logs` featuring tabs for **All Logs**, **Starred**, and **Errors**, with search, level filters, time ranges, and pagination.
+- ⌨️ **TUI & Keyboard Controls**: Live terminal UI (`c` to copy script URL, `t` to copy tag, `p` to pause/resume, `q` to quit). Keyboard shortcut `Cmd/Ctrl + Shift + L` toggles browser overlay.
+- 🗄️ **Local SQLite Storage**: Saves logs in `~/.reverse-logger/logs.db` (`better-sqlite3`) with configurable retention limit (`--max-logs`). Indexed by timestamp, level, session ID, and starred status.
 - 🔑 **Optional Token Auth**: Secure log API with `--token <secret>` (or config `"token"`).
-- 🛡️ **Hardened Browser Client**: Standalone dependency-free `/script/client.js` with session tracking (`sessionId`), circular reference handling, payload size limits, and an offline retry queue (flushes when server recovers).
+- 🛡️ **Hardened Browser Client**: Standalone dependency-free `/script/client.js` with session tracking (`sessionId`), circular reference handling, payload size limits, and an offline retry queue.
 - ⚙️ **Config File Support**: Global configuration support at `~/.reverse-logger/config.json`.
-- ⚡ **Advanced Filtering & Pagination**: Filter logs by `search`/`q`, `level`, `url`, `sessionId`, ISO `from`/`to` time ranges, `limit`, and `offset`.
 
 ## Installation & Quick Start
 
@@ -28,6 +29,38 @@ npm install -g reverse-logger
 reverse-logger serve
 ```
 
+## Public Browser API (`window.reverseLogger`)
+
+When `/script/client.js` is included in a web application, it exposes the global `window.reverseLogger` object:
+
+```javascript
+// Log standard entries programmatically
+window.reverseLogger.log("Application started");
+window.reverseLogger.info("User logged in", { userId: 42 });
+window.reverseLogger.warn("High memory usage");
+window.reverseLogger.error("API call failed", new Error("404 Not Found"));
+window.reverseLogger.debug("State update", { state: "READY" });
+
+// Log important/starred events (creates level: "special", starred: true)
+window.reverseLogger.star("Checkout completed", { orderId: "123", amount: 49.99 });
+
+// Utility methods
+window.reverseLogger.clear();          // Clear local overlay display logs
+window.reverseLogger.pause();          // Pause overlay live stream updates
+window.reverseLogger.resume();         // Resume overlay live stream updates
+console.log(window.reverseLogger.isConnected()); // Returns true if server is online
+```
+
+### Browser Overlay Keyboard Shortcut
+
+Press **`Cmd + Shift + L`** (macOS) or **`Ctrl + Shift + L`** (Windows/Linux) to toggle the browser developer overlay panel open or closed. Shortcut is automatically ignored while typing in text inputs or textareas.
+
+## Web Dashboard (`/logs`)
+
+Open `http://<server-ip>:<port>/logs` in any browser to access the interactive web dashboard:
+- **Tabs**: `All Logs`, `⭐ Starred`, `⚠️ Errors`
+- **Features**: Full text search, level selector, pagination, detailed argument inspector, star/unstar toggle, and copy as JSON/text.
+
 ## CLI Usage & Options
 
 ```bash
@@ -43,34 +76,15 @@ reverse-logger serve [options]
 | `--host <string>` | Host interface address | `0.0.0.0` |
 | `--token <string>` | Optional Bearer authentication token for API access | `undefined` |
 
-### Startup Output
+### TUI Controls
 
-When starting, plain text banner is printed to standard output for easy mouse selection:
-
-```text
-Reverse Logger
-
-Server : http://192.168.1.15:5050
-Script : http://192.168.1.15:5050/script/client.js
-
-Tag:
-<script src="http://192.168.1.15:5050/script/client.js"></script>
-```
-
-### TUI Keyboard Controls
-
-While the TUI is active in terminal:
-
-- `c`: Copy script URL to system clipboard
-- `t`: Copy script `<script>` tag to system clipboard
+- `c`: Copy script URL
+- `t`: Copy HTML `<script>` tag
 - `p`: Pause / resume live log updates
 - `q`: Quit server and exit
-- `↑` / `↓`: Scroll log entries list
-- `1` - `5`: Level filter shortcuts (1:ALL, 2:LOG, 3:INFO, 4:WARN, 5:ERR)
+- `1` - `5`: Level filter shortcuts (ALL, LOG, INFO, WARN, ERR)
 
 ## Configuration File (`~/.reverse-logger/config.json`)
-
-You can save default configurations in `~/.reverse-logger/config.json`:
 
 ```json
 {
@@ -81,105 +95,58 @@ You can save default configurations in `~/.reverse-logger/config.json`:
 }
 ```
 
-*Note: CLI flags always take precedence over configuration file values.*
-
 ## Log Schema
-
-Log entries adhere to the standardized structure:
 
 ```typescript
 interface LogEntry {
   id: number;
-  timestamp: string;     // ISO 8601 string (e.g., "2026-09-07T18:00:00.000Z")
-  level: string;         // "log" | "info" | "warn" | "error" | "debug"
-  message: string;       // Primary text representation of console arguments
+  timestamp: string;     // ISO 8601 string
+  level: string;         // "log" | "info" | "warn" | "error" | "debug" | "special"
+  message: string;       // Primary text representation of arguments
   args: unknown[];       // Raw arguments array
   url?: string;          // Origin page URL
   stack?: string;        // Error stack trace (if available)
   userAgent?: string;    // Browser user agent
   sessionId?: string;    // Unique browser session ID
+  starred: boolean;      // True if starred/important
+  source?: "console" | "reverseLogger"; // Log origin source
   createdAt?: string;    // Server ingestion timestamp
 }
 ```
 
 ## API Endpoints
 
-### 1. Standalone Client Script
-
+### 1. Browser Client Script
 ```text
 GET /script/client.js
 ```
-Serves the dependency-free browser client proxy script. When `--token` is active, the script automatically extracts `?token=YOUR_TOKEN` from its script tag `src` attribute.
 
 ### 2. Retrieve Logs with Combined Filtering & Pagination
-
 ```text
 GET /api/logs
 ```
+Query Parameters: `level`, `search`/`q`, `url`, `sessionId`, `starred` (`true`/`false`), `from`, `to`, `limit`, `offset`.
 
-#### Query Parameters
-
-| Parameter | Type | Description |
-| --- | --- | --- |
-| `level` | `string` | Filter by level (`log`, `info`, `warn`, `error`, `debug`) |
-| `search` / `q` | `string` | Substring search across message, arguments, URL, or stack |
-| `url` | `string` | Partial or exact URL filter |
-| `from` | `string` / `number` | Start ISO timestamp or time ms |
-| `to` | `string` / `number` | End ISO timestamp or time ms |
-| `limit` | `number` | Result limit (default: `20`) |
-| `offset` | `number` | Result offset for pagination (default: `0`) |
-
-#### Example Query
-
+### 3. Retrieve Starred Logs
 ```text
-GET /api/logs?q=auth&level=error&url=example.com&limit=10&offset=0
+GET /api/logs/starred
 ```
+Alias for `GET /api/logs?starred=true`.
 
-#### Example Response
-
-```json
-{
-  "logs": [
-    {
-      "id": 42,
-      "timestamp": "2026-09-07T18:15:00.000Z",
-      "level": "error",
-      "message": "Auth failed: Invalid credentials",
-      "args": ["Auth failed: Invalid credentials", { "code": 401 }],
-      "url": "http://example.com/auth",
-      "stack": "Error: Auth failed\n    at login (http://example.com/app.js:10:5)",
-      "userAgent": "Mozilla/5.0...",
-      "sessionId": "s_a1b2c3d4e",
-      "createdAt": "2026-09-07T18:15:00.100Z"
-    }
-  ],
-  "total": 1,
-  "limit": 10,
-  "offset": 0
-}
+### 4. Toggle Starred State
+```text
+POST /api/logs/:id/star
 ```
+Payload: `{ "starred": true }` or `{ "starred": false }`. Toggles state if body is empty.
 
-### 3. Ingest Log Entry
-
+### 5. Ingest Log Entry
 ```text
 POST /api/logs
 ```
 
-Requires `Authorization: Bearer <token>` or `?token=<token>` when authentication is enabled.
-
-```json
-{
-  "level": "warn",
-  "message": "High memory usage detected",
-  "args": ["High memory usage detected"],
-  "url": "http://localhost:3000/dashboard",
-  "sessionId": "s_a1b2c3d4e"
-}
-```
-
 ## Running Tests
 
-Run the comprehensive test suite covering search, level, URL, combined filters, pagination, ISO time ranges, authentication, CORS, retention limits, payload limits, and malformed request handling:
+Run full test suite:
 
 ```bash
 npm test

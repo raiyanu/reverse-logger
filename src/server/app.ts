@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { LoggerDatabase } from './db';
+import { getDashboardHtml } from './dashboardHtml';
 import { LogEntry, LogLevel, ServerOptions } from '../types';
 
 export interface ServerInstance {
@@ -41,8 +42,6 @@ const DEFAULT_CLIENT_SCRIPT = `(function () {
   var cfg = getScriptConfig();
   var apiEndpoint = cfg.origin + '/api/logs';
   var authToken = cfg.token;
-  var isSending = false;
-  var queue = [];
 
   function safeSerialize(obj) {
     var cache = new WeakSet();
@@ -64,15 +63,18 @@ const DEFAULT_CLIENT_SCRIPT = `(function () {
     }));
   }
 
-  function sendLog(level, rawArgs) {
+  function sendLog(level, rawArgs, extra) {
     try {
       var serializedArgs = rawArgs.map(safeSerialize);
       var payload = {
         timestamp: new Date().toISOString(),
         level: level,
+        message: extra && extra.message ? extra.message : rawArgs.map(function(a) { return typeof a === 'object' ? JSON.stringify(a) : String(a); }).join(' '),
         args: serializedArgs,
         url: typeof window !== 'undefined' ? window.location.href : '',
-        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : ''
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        starred: extra && extra.starred ? true : false,
+        source: extra && extra.source ? extra.source : 'console'
       };
       var headers = { 'Content-Type': 'application/json' };
       if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
@@ -133,8 +135,14 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
     app.addHook('onRequest', async (request, reply) => {
       const urlPath = request.url.split('?')[0];
 
-      // Skip authentication for client script
-      if (urlPath === '/script/client.js' || urlPath === '/' || request.method === 'OPTIONS') {
+      // Skip authentication for client script, web dashboard, and preflights
+      if (
+        urlPath === '/script/client.js' ||
+        urlPath === '/logs' ||
+        urlPath === '/dashboard' ||
+        urlPath === '/' ||
+        request.method === 'OPTIONS'
+      ) {
         return;
       }
 
@@ -155,6 +163,17 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
       }
     });
   }
+
+  // Web Dashboard Route
+  app.get('/logs', async (request, reply) => {
+    reply.type('text/html');
+    return getDashboardHtml();
+  });
+
+  app.get('/dashboard', async (request, reply) => {
+    reply.type('text/html');
+    return getDashboardHtml();
+  });
 
   // Serve browser client script
   app.get('/script/client.js', async (request, reply) => {
@@ -183,6 +202,51 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
     return DEFAULT_CLIENT_SCRIPT;
   });
 
+  // GET /api/logs/starred
+  app.get('/api/logs/starred', async (request, reply) => {
+    const query = request.query as Record<string, string>;
+    const limit = query.limit ? parseInt(query.limit, 10) : 20;
+    const offset = query.offset ? parseInt(query.offset, 10) : 0;
+    const search = query.search || query.q || undefined;
+
+    const queryOptions = {
+      limit,
+      offset,
+      search,
+      starred: true,
+    };
+
+    const logs = db.getLogs(queryOptions);
+    const total = db.getLogCount(queryOptions);
+
+    return {
+      logs,
+      total,
+      limit,
+      offset,
+    };
+  });
+
+  // POST /api/logs/:id/star
+  app.post('/api/logs/:id/star', async (request, reply) => {
+    const params = request.params as { id: string };
+    const id = parseInt(params.id, 10);
+
+    if (isNaN(id)) {
+      reply.status(400);
+      return { success: false, error: 'Invalid log ID' };
+    }
+
+    const body = request.body as { starred?: boolean } | undefined;
+    const isStarred = db.toggleStarred(id, body?.starred);
+
+    return {
+      success: true,
+      id,
+      starred: isStarred,
+    };
+  });
+
   // GET /api/logs
   app.get('/api/logs', async (request, reply) => {
     const query = request.query as Record<string, string>;
@@ -196,6 +260,7 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
     const search = query.search || query.q || undefined;
     const urlFilter = query.url || undefined;
     const sessionId = query.sessionId || query.session_id || undefined;
+    const starredParam = query.starred === 'true' ? true : query.starred === 'false' ? false : undefined;
 
     const queryOptions = {
       limit,
@@ -206,6 +271,7 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
       search,
       url: urlFilter,
       sessionId,
+      starred: starredParam,
     };
 
     const logs = db.getLogs(queryOptions);
@@ -228,7 +294,7 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
       return { success: false, error: 'Invalid log payload' };
     }
 
-    const level = body.level && ['log', 'info', 'warn', 'error', 'debug'].includes(body.level.toLowerCase())
+    const level = body.level && ['log', 'info', 'warn', 'error', 'debug', 'special'].includes(body.level.toLowerCase())
       ? body.level.toLowerCase()
       : 'info';
 
@@ -241,6 +307,8 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
       stack: body.stack,
       userAgent: body.userAgent || (request.headers['user-agent'] as string) || '',
       sessionId: body.sessionId,
+      starred: Boolean(body.starred),
+      source: body.source || (level === 'special' ? 'reverseLogger' : 'console'),
     };
 
     const inserted = db.insertLog(entry, maxLogs);

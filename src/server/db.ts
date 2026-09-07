@@ -32,17 +32,19 @@ export class LoggerDatabase {
         stack TEXT,
         user_agent TEXT,
         session_id TEXT,
+        starred INTEGER DEFAULT 0,
+        source TEXT DEFAULT 'console',
         created_at TEXT NOT NULL
       );
     `);
 
-    // Migration helper: check columns in case database was created with older schema
+    // Migration helper for existing databases
     const columnsInfo = this.db.prepare('PRAGMA table_info(logs)').all() as Array<{ name: string }>;
     const columnNames = new Set(columnsInfo.map((c) => c.name));
 
     if (!columnNames.has('timestamp_ms')) {
       this.db.exec('ALTER TABLE logs ADD COLUMN timestamp_ms INTEGER DEFAULT 0;');
-      this.db.exec('UPDATE logs SET timestamp_ms = CAST(timestamp AS INTEGER) WHERE timestamp_ms = 0 AND timestamp GLOB "[0-9]*";');
+      this.db.exec("UPDATE logs SET timestamp_ms = CAST(timestamp AS INTEGER) WHERE timestamp_ms = 0 AND timestamp GLOB '[0-9]*';");
     }
     if (!columnNames.has('message')) {
       this.db.exec('ALTER TABLE logs ADD COLUMN message TEXT DEFAULT "";');
@@ -51,12 +53,19 @@ export class LoggerDatabase {
     if (!columnNames.has('session_id')) {
       this.db.exec('ALTER TABLE logs ADD COLUMN session_id TEXT;');
     }
+    if (!columnNames.has('starred')) {
+      this.db.exec('ALTER TABLE logs ADD COLUMN starred INTEGER DEFAULT 0;');
+    }
+    if (!columnNames.has('source')) {
+      this.db.exec("ALTER TABLE logs ADD COLUMN source TEXT DEFAULT 'console';");
+    }
 
-    // Ensure sensible indexes
+    // Ensure indexes
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp_ms);
       CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
       CREATE INDEX IF NOT EXISTS idx_logs_session_id ON logs(session_id);
+      CREATE INDEX IF NOT EXISTS idx_logs_starred ON logs(starred);
     `);
   }
 
@@ -85,10 +94,12 @@ export class LoggerDatabase {
     }
 
     const argsJson = JSON.stringify(argsArray);
+    const isStarred = entry.starred ? 1 : 0;
+    const logSource = entry.source || 'console';
 
     const stmt = this.db.prepare(`
-      INSERT INTO logs (timestamp, timestamp_ms, level, message, args, url, stack, user_agent, session_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO logs (timestamp, timestamp_ms, level, message, args, url, stack, user_agent, session_id, starred, source, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const info = stmt.run(
@@ -101,6 +112,8 @@ export class LoggerDatabase {
       entry.stack || null,
       entry.userAgent || null,
       entry.sessionId || null,
+      isStarred,
+      logSource,
       isoCreatedAt
     );
 
@@ -120,8 +133,22 @@ export class LoggerDatabase {
       stack: entry.stack || undefined,
       userAgent: entry.userAgent || undefined,
       sessionId: entry.sessionId || undefined,
+      starred: Boolean(isStarred),
+      source: logSource as any,
       createdAt: isoCreatedAt,
     };
+  }
+
+  public toggleStarred(id: number, explicitStarred?: boolean): boolean {
+    if (explicitStarred !== undefined) {
+      const stmt = this.db.prepare('UPDATE logs SET starred = ? WHERE id = ?');
+      stmt.run(explicitStarred ? 1 : 0, id);
+      return explicitStarred;
+    } else {
+      const stmt = this.db.prepare('UPDATE logs SET starred = CASE WHEN starred = 1 THEN 0 ELSE 1 END WHERE id = ? RETURNING starred');
+      const result = stmt.get(id) as { starred: number } | undefined;
+      return result ? Boolean(result.starred) : false;
+    }
   }
 
   public truncateLogs(maxLogs: number): void {
@@ -143,6 +170,18 @@ export class LoggerDatabase {
       params.push(options.level.toLowerCase());
     }
 
+    // Starred filter
+    if (options.starred !== undefined) {
+      conditions.push('starred = ?');
+      params.push(options.starred ? 1 : 0);
+    }
+
+    // Source filter
+    if (options.source) {
+      conditions.push('source = ?');
+      params.push(options.source);
+    }
+
     // URL filter
     if (options.url) {
       conditions.push('url LIKE ?');
@@ -162,7 +201,7 @@ export class LoggerDatabase {
       params.push(term, term, term, term);
     }
 
-    // Time range filters (from / since, to / until)
+    // Time range filters
     const fromVal = options.from ?? options.since;
     if (fromVal !== undefined) {
       const fromMs = this.parseToMs(fromVal);
@@ -205,6 +244,8 @@ export class LoggerDatabase {
       stack: row.stack || undefined,
       userAgent: row.user_agent || undefined,
       sessionId: row.session_id || undefined,
+      starred: Boolean(row.starred),
+      source: (row.source as any) || 'console',
       createdAt: row.created_at || undefined,
     }));
   }

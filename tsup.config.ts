@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig([
-  // Node CLI entry (ESM format as .mjs)
+  // Node CLI entry
   {
     entry: ['src/cli.ts'],
     format: ['esm'],
@@ -10,7 +10,7 @@ export default defineConfig([
     clean: true,
     outExtension() {
       return {
-        js: '.mjs',
+        js: '.js',
       };
     },
     banner: {

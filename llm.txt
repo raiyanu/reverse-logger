@@ -1,0 +1,200 @@
+# reverse-logger Application Usage Guide
+
+`reverse-logger` is a local reverse logger server and browser console monitor. It captures browser console activity and application events in real time, displaying them in a live terminal UI, an in-browser developer overlay, and an interactive web dashboard.
+
+---
+
+## 1. Installation & Starting the Server
+
+### Start via npx (Zero Setup)
+
+```bash
+npx reverse-logger serve
+```
+
+### Global Installation
+
+```bash
+npm install -g reverse-logger
+reverse-logger serve
+```
+
+### Server CLI Command & Flags
+
+```bash
+reverse-logger serve [options]
+```
+
+- `--max-logs <number>`: Maximum logs retained in SQLite database (default: `10000`).
+- `--port <number>`: Starting port to bind server (default: `5050`).
+- `--host <string>`: Network host address to bind (default: `0.0.0.0`).
+- `--token <string>`: Optional Bearer authentication token for API protection.
+
+Example with token and custom log limit:
+
+```bash
+npx reverse-logger serve --token my_secret_token --max-logs 50000
+```
+
+---
+
+## 2. Configuration File (`~/.reverse-logger/config.json`)
+
+Set default server options globally by creating `~/.reverse-logger/config.json`:
+
+```json
+{
+  "maxLogs": 10000,
+  "port": 5050,
+  "host": "0.0.0.0",
+  "token": "my_secret_token"
+}
+```
+
+*Note: CLI flags override configuration file settings.*
+
+---
+
+## 3. Integrating into Web Applications
+
+Add the script tag to any web page or web app:
+
+```html
+<script src="http://<server-ip>:5050/script/client.js"></script>
+```
+
+### Authenticated Setup (When `--token` is active)
+
+Include the token in the script URL:
+
+```html
+<script src="http://<server-ip>:5050/script/client.js?token=my_secret_token"></script>
+```
+
+---
+
+## 4. In-Browser Developer Overlay
+
+Once `/script/client.js` is loaded, a lightweight developer overlay is automatically injected into the web page.
+
+### Features
+- **Floating Badge**: Positioned at bottom-right showing status (`●` connected / `○` offline), total logs, warnings (`⚠`), and errors (`✕`).
+- **Keyboard Shortcut**: Press **`Cmd + Shift + L`** (macOS) or **`Ctrl + Shift + L`** (Windows/Linux) to toggle the panel open/close.
+- **Log Panel**: Real-time log list, Search bar, Level filter, Starred logs tab, Clear view, Pause/Resume toggle.
+- **Log Inspector**: Expand any log to view arguments, URL, stack trace, session ID, star/unstar toggle, and copy log data.
+- **Zero Style Leakage**: Isolated via Shadow DOM so it never interferes with host site CSS or layout.
+
+---
+
+## 5. Browser JavaScript API (`window.reverseLogger`)
+
+Interact with the logger programmatically inside browser code:
+
+### Application Logging
+
+```javascript
+window.reverseLogger.log("App initialized");
+window.reverseLogger.info("User signed in", { userId: "user_123" });
+window.reverseLogger.warn("Deprecation notice", "API v1 retiring");
+window.reverseLogger.error("Failed to load resource", new Error("404 Not Found"));
+window.reverseLogger.debug("State transition", { from: "IDLE", to: "BUSY" });
+```
+
+### Important / Starred Logs (`.star()`)
+
+Mark key application milestones or important events:
+
+```javascript
+window.reverseLogger.star("Order Completed", { orderId: "ORD-9912", total: 149.50 });
+```
+This automatically logs with `level: "special"`, `starred: true`, and `source: "reverseLogger"`.
+
+### Overlay & Connection Controls
+
+```javascript
+window.reverseLogger.clear();          // Clear overlay log display
+window.reverseLogger.pause();          // Pause live log updates
+window.reverseLogger.resume();         // Resume live log updates
+console.log(window.reverseLogger.isConnected()); // Returns boolean server status
+```
+
+---
+
+## 6. Interactive Terminal UI (TUI) Controls
+
+When running `reverse-logger serve`:
+
+1. **Terminal Banner**: Plain text URLs and script tags are printed to stdout first for easy terminal mouse text selection.
+2. **Interactive TUI Controls**:
+   - `c`: Copy script URL to system clipboard
+   - `t`: Copy HTML `<script>` tag to system clipboard
+   - `p`: Pause / resume live terminal log stream
+   - `q`: Quit server cleanly
+   - `↑` / `↓`: Scroll log list
+   - `1` - `5`: Level filter shortcuts (ALL, LOG, INFO, WARN, ERR)
+
+---
+
+## 7. Web Dashboard (`/logs`)
+
+Access the browser web dashboard at:
+
+```text
+http://<server-ip>:5050/logs
+```
+
+### Dashboard Capabilities
+- **Tabs**: `All Logs`, `⭐ Starred`, `⚠️ Errors`
+- **Search & Filters**: Search across message text, arguments, URL, stack, level, and session ID.
+- **Log Inspector**: Expand log items to inspect JSON arguments, stack traces, copy text/JSON, or toggle star state.
+- **Pagination**: Navigate pages with Previous/Next buttons and page size selector.
+
+---
+
+## 8. HTTP REST API Reference
+
+### Retrieve Logs
+```text
+GET /api/logs
+```
+
+**Query Parameters:**
+- `level`: `log` | `info` | `warn` | `error` | `debug` | `special`
+- `search` / `q`: Full-text search string
+- `url`: Substring filter for origin page URL
+- `sessionId`: Session ID filter
+- `starred`: `true` | `false`
+- `from` / `to`: Start/end ISO date strings or millisecond timestamps
+- `limit`: Result count limit (default: `20`)
+- `offset`: Result offset for pagination (default: `0`)
+
+**Example Request:**
+```text
+GET /api/logs?q=auth&level=error&limit=10&offset=0
+```
+
+### Retrieve Starred Logs
+```text
+GET /api/logs/starred
+```
+
+### Toggle Star Status
+```text
+POST /api/logs/:id/star
+```
+Payload: `{ "starred": true }` or `{ "starred": false }`
+
+### Ingest Log
+```text
+POST /api/logs
+```
+Payload:
+```json
+{
+  "level": "warn",
+  "message": "API latency spike",
+  "args": ["API latency spike", { "durationMs": 1420 }],
+  "url": "http://localhost:3000/dashboard",
+  "sessionId": "s_a1b2c3d4e"
+}
+```
