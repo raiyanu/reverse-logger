@@ -1,0 +1,56 @@
+{
+  "name": "reverse-logger",
+  "version": "0.1.0",
+  "description": "Local reverse logger server receiving browser console logs with TUI and SQLite storage",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "reverse-logger": "./dist/cli.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "tsc --noEmit",
+    "changeset": "changeset"
+  },
+  "keywords": [
+    "reverse-logger",
+    "console",
+    "logger",
+    "tui",
+    "fastify",
+    "sqlite",
+    "browser-logs"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "better-sqlite3": "^11.3.0",
+    "commander": "^12.1.0",
+    "fastify": "^5.0.0",
+    "ink": "^5.0.1",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.8",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.5.4",
+    "@types/react": "^18.3.5",
+    "tsup": "^8.2.4",
+    "typescript": "^5.5.4"
+  }
+}
