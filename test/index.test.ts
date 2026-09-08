@@ -304,37 +304,39 @@ async function runAllTests() {
     const dbPath = path.join(testDbDir, 'test8.db');
     if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
 
-    const port = 5108;
+    const port1 = 5108;
+    const port2 = 5109;
+
     // Step 1: Create initial server and populate data
-    const server1 = createServer({ port, dbPath });
-    await server1.listen(port);
-    await fetch(`http://127.0.0.1:${port}/api/logs`, {
+    const server1 = createServer({ port: port1, dbPath });
+    await server1.listen(port1);
+    await fetch(`http://127.0.0.1:${port1}/api/logs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: 'Pre-existing log' }),
     });
-    const check1 = await fetch(`http://127.0.0.1:${port}/api/logs`);
+    const check1 = await fetch(`http://127.0.0.1:${port1}/api/logs`);
     const data1 = await check1.json();
     assert(data1.total === 1, 'Server 1 should have 1 log record');
     await server1.close();
 
-    // Step 2: Start server with flush: true -> should clear all existing logs on startup
-    const server2 = createServer({ port, dbPath, flush: true });
-    await server2.listen(port);
-    const check2 = await fetch(`http://127.0.0.1:${port}/api/logs`);
+    // Step 2: Start server on port2 with flush: true -> should clear all existing logs on startup
+    const server2 = createServer({ port: port2, dbPath, flush: true });
+    await server2.listen(port2);
+    const check2 = await fetch(`http://127.0.0.1:${port2}/api/logs`);
     const data2 = await check2.json();
     assert(data2.total === 0, 'Server 2 with flush: true should start with 0 logs');
 
     // Populate a log and test DELETE /api/logs endpoint
-    await fetch(`http://127.0.0.1:${port}/api/logs`, {
+    await fetch(`http://127.0.0.1:${port2}/api/logs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: 'Temporary log' }),
     });
-    const delRes = await fetch(`http://127.0.0.1:${port}/api/logs`, { method: 'DELETE' });
+    const delRes = await fetch(`http://127.0.0.1:${port2}/api/logs`, { method: 'DELETE' });
     assert(delRes.status === 200, 'DELETE /api/logs should return status 200');
 
-    const check3 = await fetch(`http://127.0.0.1:${port}/api/logs`);
+    const check3 = await fetch(`http://127.0.0.1:${port2}/api/logs`);
     const data3 = await check3.json();
     assert(data3.total === 0, 'Database should be empty after DELETE /api/logs');
 
