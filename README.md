@@ -236,12 +236,30 @@ There are a few tools solving parts of the browser-to-terminal debugging problem
 | SQLite persistence          | ✅              | —          | —              | —                   |
 | REST API                    | ✅              | —          | —              | —                   |
 | AI-agent integration        | ✅              | ✅          | —              | —                   |
+| Network monitoring          | -              | ✅          | —              | —                   |
 | Fully local                 | ✅              | ✅          | ✅              | ✅                   |
 
 
 **Reverse Logger brings these pieces together** into a single local development tool, with browser logs, server logs, persistence, multiple interfaces, and an API designed to make runtime information accessible to AI coding agents.
 
 **References:** [Local Lens](https://github.com/aotakeda/local-lens) · [Console Bridge](https://chromewebstore.google.com/detail/console-bridge/jingljafbckmojgdajebiopamenohgjb) · [Chrome DevTools CLI](https://github.com/aeroxy/chrome-devtools-cli)
+
+## 🚀 Future Plans
+
+Reverse Logger is still evolving. Some things on the roadmap:
+
+- [ ] **Automatic browser error capture** — uncaught exceptions, unhandled promise rejections, `window.onerror`, and resource failures.
+- [ ] **Network monitoring** — capture `fetch` / XHR requests, responses, failures, status codes, and timing.
+- [ ] **Request correlation** — connect browser → network → server logs using request/trace IDs.
+- [ ] **AI-friendly debug context** — a dedicated API that gives agents a concise snapshot of what's currently going wrong.
+- [ ] **MCP server** — let AI coding agents query Reverse Logger directly through MCP.
+- [ ] **JSON CLI output** — make logs easy to consume from scripts and AI agents.
+- [ ] **Incident grouping** — automatically group related errors, failed requests, and server logs into a single incident.
+- [ ] **Sensitive data redaction** — automatically redact passwords, tokens, cookies, authorization headers, and other sensitive values.
+- [ ] **Better AI-agent workflows** — make it easier for agents to observe, reproduce, and diagnose runtime issues.
+- [ ] **Improved debugging experience** — continue improving the TUI, dashboard, browser overlay, filtering, and search.
+
+> The long-term goal is to make Reverse Logger a **local runtime observability layer for AI-assisted development** — giving coding agents the context they need to understand what is actually happening inside your application while saving the tokens consumed during sandbox browser runs.
 
 
 ## License
