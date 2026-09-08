@@ -139,6 +139,85 @@ export class LoggerDatabase {
     };
   }
 
+  public insertLogsBatch(entries: Partial<LogEntry>[], maxLogs: number = 10000): LogEntry[] {
+    if (!entries || entries.length === 0) return [];
+    const nowMs = Date.now();
+    const isoCreatedAt = new Date(nowMs).toISOString();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO logs (timestamp, timestamp_ms, level, message, args, url, stack, user_agent, session_id, starred, source, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertedEntries: LogEntry[] = [];
+
+    const insertTransaction = this.db.transaction((items: Partial<LogEntry>[]) => {
+      for (const entry of items) {
+        let tsMs = nowMs;
+        if (entry.timestamp) {
+          const parsed = Date.parse(entry.timestamp);
+          if (!isNaN(parsed)) {
+            tsMs = parsed;
+          } else if (typeof entry.timestamp === 'number') {
+            tsMs = entry.timestamp;
+          }
+        }
+
+        const isoTimestamp = new Date(tsMs).toISOString();
+        const argsArray = Array.isArray(entry.args) ? entry.args : [entry.args ?? ''];
+
+        let messageStr = entry.message;
+        if (!messageStr) {
+          messageStr = argsArray
+            .map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
+            .join(' ');
+        }
+
+        const argsJson = JSON.stringify(argsArray);
+        const isStarred = entry.starred ? 1 : 0;
+        const logSource = entry.source || 'console';
+        const lvl = entry.level ? entry.level.toLowerCase() : 'info';
+
+        const info = stmt.run(
+          isoTimestamp,
+          tsMs,
+          lvl,
+          messageStr,
+          argsJson,
+          entry.url || null,
+          entry.stack || null,
+          entry.userAgent || null,
+          entry.sessionId || null,
+          isStarred,
+          logSource,
+          isoCreatedAt
+        );
+
+        insertedEntries.push({
+          id: info.lastInsertRowid as number,
+          timestamp: isoTimestamp,
+          level: lvl,
+          message: messageStr,
+          args: argsArray,
+          url: entry.url || undefined,
+          stack: entry.stack || undefined,
+          userAgent: entry.userAgent || undefined,
+          sessionId: entry.sessionId || undefined,
+          starred: Boolean(isStarred),
+          source: logSource as any,
+          createdAt: isoCreatedAt,
+        });
+      }
+
+      if (maxLogs > 0) {
+        this.truncateLogs(maxLogs);
+      }
+    });
+
+    insertTransaction(entries);
+    return insertedEntries;
+  }
+
   public toggleStarred(id: number, explicitStarred?: boolean): boolean {
     if (explicitStarred !== undefined) {
       const stmt = this.db.prepare('UPDATE logs SET starred = ? WHERE id = ?');

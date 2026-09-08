@@ -203,6 +203,47 @@ async function runAllTests() {
     console.log('   ✓ CORS Preflight & Headers OK');
   }
 
+  // --- Test Suite 6: High-Volume Batch Log Ingestion (1,000 Logs) ---
+  {
+    console.log('6. Testing High-Volume Batch Log Ingestion (1,000 Logs)...');
+    const dbPath = path.join(testDbDir, 'test6.db');
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+
+    const port = 5106;
+    const server = createServer({ port, maxLogs: 2000, dbPath });
+    await server.listen(port);
+
+    const logsBatch = Array.from({ length: 1000 }, (_, i) => ({
+      timestamp: new Date().toISOString(),
+      level: i % 10 === 0 ? 'error' : i % 5 === 0 ? 'warn' : 'log',
+      message: `Batch log message #${i + 1}`,
+      args: [`Batch log message #${i + 1}`, { index: i + 1 }],
+      url: 'http://app.local/stress-test',
+      sessionId: 'sess_stress_1000',
+    }));
+
+    const startTime = Date.now();
+    const batchRes = await fetch(`http://127.0.0.1:${port}/api/logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ logs: logsBatch }),
+    });
+
+    const duration = Date.now() - startTime;
+    assert(batchRes.status === 200, 'Batch POST /api/logs status should be 200');
+
+    const batchData = await batchRes.json();
+    assert(batchData.success === true, 'batchData.success should be true');
+    assert(batchData.count === 1000, `Expected 1000 logs inserted, got ${batchData.count}`);
+
+    const getRes = await fetch(`http://127.0.0.1:${port}/api/logs?limit=10`);
+    const getData = await getRes.json();
+    assert(getData.total === 1000, `Expected total stored count 1000, got ${getData.total}`);
+
+    console.log(`   ✓ Ingested 1,000 logs in batch mode cleanly in ${duration}ms OK`);
+    await server.close();
+  }
+
   // Clean test databases
   try {
     fs.rmSync(testDbDir, { recursive: true, force: true });
@@ -210,7 +251,7 @@ async function runAllTests() {
     // ignore
   }
 
-  console.log('\n🎉 ALL 5 EXPANDED TEST SUITES PASSED CLEANLY!\n');
+  console.log('\n🎉 ALL 6 EXPANDED TEST SUITES PASSED CLEANLY!\n');
 }
 
 runAllTests().catch((err) => {

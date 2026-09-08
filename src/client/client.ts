@@ -80,8 +80,25 @@
   let isSending = false;
   let isPaused = false;
   const queue: any[] = [];
-  const MAX_QUEUE_SIZE = 50;
+  const MAX_QUEUE_SIZE = 5000;
+  const BATCH_SIZE = 100;
   const MAX_STRING_LEN = 10000;
+
+  // Throttled UI overlay updates (max once per animation frame)
+  let overlayUpdateScheduled = false;
+  function scheduleOverlayUpdate() {
+    if (overlayUpdateScheduled) return;
+    overlayUpdateScheduled = true;
+    const requestFrame =
+      typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame
+        : (cb: () => void) => setTimeout(cb, 16);
+
+    requestFrame(() => {
+      overlayUpdateScheduled = false;
+      updateOverlayUI();
+    });
+  }
 
   // Internal captured logs array for browser overlay UI
   const localLogs: any[] = [];
@@ -135,21 +152,42 @@
     return undefined;
   }
 
+  let flushTimer: any = null;
+
   function enqueuePayload(payload: any) {
     if (queue.length >= MAX_QUEUE_SIZE) {
       queue.shift();
     }
     queue.push(payload);
-    flushQueue();
+    scheduleFlush();
+  }
+
+  function scheduleFlush(delay: number = 0) {
+    if (isSending || queue.length === 0) return;
+    if (delay === 0) {
+      flushQueue();
+    } else if (!flushTimer) {
+      flushTimer = setTimeout(() => {
+        flushTimer = null;
+        flushQueue();
+      }, delay);
+    }
   }
 
   function flushQueue() {
     if (isSending || queue.length === 0 || typeof fetch !== 'function') {
       return;
     }
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+
     isSending = true;
 
-    const payload = queue[0];
+    const batch = queue.slice(0, BATCH_SIZE);
+    const bodyPayload = batch.length === 1 ? batch[0] : { logs: batch };
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -161,28 +199,28 @@
     fetch(apiEndpoint, {
       method: 'POST',
       headers,
-      body: JSON.stringify(payload),
+      body: JSON.stringify(bodyPayload),
       mode: 'cors',
       keepalive: true,
     })
       .then((res) => {
         if (res.ok || res.status === 400) {
           isConnected = true;
-          queue.shift();
-          updateOverlayUI();
+          queue.splice(0, batch.length);
+          scheduleOverlayUpdate();
         } else {
           isConnected = false;
-          updateOverlayUI();
+          scheduleOverlayUpdate();
         }
       })
       .catch(() => {
         isConnected = false;
-        updateOverlayUI();
+        scheduleOverlayUpdate();
       })
       .finally(() => {
         isSending = false;
         if (queue.length > 0) {
-          setTimeout(flushQueue, 3000);
+          scheduleFlush(50);
         }
       });
   }
@@ -224,7 +262,7 @@
         if (localLogs.length > 500) localLogs.pop();
       }
 
-      updateOverlayUI();
+      scheduleOverlayUpdate();
 
       // Transmit payload
       enqueuePayload(logItem);
@@ -455,6 +493,10 @@
     // Render Panel
     if (panelEl) {
       panelEl.className = `rl-panel ${isPanelOpen ? 'open' : ''}`;
+      if (!isPanelOpen) {
+        panelEl.innerHTML = '';
+        return;
+      }
       panelEl.innerHTML = '';
 
       // Header
@@ -557,13 +599,16 @@
         return true;
       });
 
+      const MAX_RENDERED = 100;
+      const visible = filtered.slice(0, MAX_RENDERED);
+
       if (filtered.length === 0) {
         const empty = document.createElement('div');
         empty.style.cssText = 'padding: 20px; text-align: center; color: #94a3b8; font-size: 11px;';
         empty.textContent = 'No captured logs matching filters.';
         listEl.appendChild(empty);
       } else {
-        filtered.forEach((log) => {
+        visible.forEach((log) => {
           const isStarred = log.starred || localStarred.has(String(log.id));
           const item = document.createElement('div');
           item.className = 'rl-item';
@@ -656,6 +701,13 @@
           item.appendChild(details);
           listEl.appendChild(item);
         });
+
+        if (filtered.length > MAX_RENDERED) {
+          const capNotice = document.createElement('div');
+          capNotice.style.cssText = 'padding: 6px; text-align: center; color: #94a3b8; font-size: 10px; font-style: italic;';
+          capNotice.textContent = `Showing 100 of ${filtered.length} captured logs`;
+          listEl.appendChild(capNotice);
+        }
       }
 
       panelEl.appendChild(listEl);

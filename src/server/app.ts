@@ -287,37 +287,61 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
 
   // POST /api/logs
   app.post('/api/logs', async (request, reply) => {
-    const body = request.body as Partial<LogEntry>;
+    const body = request.body as any;
 
     if (!body || typeof body !== 'object') {
       reply.status(400);
       return { success: false, error: 'Invalid log payload' };
     }
 
-    const level = body.level && ['log', 'info', 'warn', 'error', 'debug', 'special'].includes(body.level.toLowerCase())
-      ? body.level.toLowerCase()
-      : 'info';
+    const rawEntries: Partial<LogEntry>[] = Array.isArray(body)
+      ? body
+      : Array.isArray(body.logs)
+      ? body.logs
+      : [body];
 
-    const entry: Partial<LogEntry> = {
-      timestamp: body.timestamp || new Date().toISOString(),
-      level,
-      message: body.message,
-      args: Array.isArray(body.args) ? body.args : [body.args ?? ''],
-      url: body.url || (request.headers.referer || request.headers.origin as string) || '',
-      stack: body.stack,
-      userAgent: body.userAgent || (request.headers['user-agent'] as string) || '',
-      sessionId: body.sessionId,
-      starred: Boolean(body.starred),
-      source: body.source || (level === 'special' ? 'reverseLogger' : 'console'),
-    };
+    if (rawEntries.length === 0) {
+      reply.status(400);
+      return { success: false, error: 'Empty log payload' };
+    }
 
-    const inserted = db.insertLog(entry, maxLogs);
-    events.emit('log', inserted);
+    const processedEntries: Partial<LogEntry>[] = rawEntries.map((entry) => {
+      const level = entry.level && ['log', 'info', 'warn', 'error', 'debug', 'special'].includes(entry.level.toLowerCase())
+        ? entry.level.toLowerCase()
+        : 'info';
 
-    return {
-      success: true,
-      log: inserted,
-    };
+      return {
+        timestamp: entry.timestamp || new Date().toISOString(),
+        level,
+        message: entry.message,
+        args: Array.isArray(entry.args) ? entry.args : [entry.args ?? ''],
+        url: entry.url || (request.headers.referer || (request.headers.origin as string)) || '',
+        stack: entry.stack,
+        userAgent: entry.userAgent || (request.headers['user-agent'] as string) || '',
+        sessionId: entry.sessionId,
+        starred: Boolean(entry.starred),
+        source: entry.source || (level === 'special' ? 'reverseLogger' : 'console'),
+      };
+    });
+
+    if (processedEntries.length === 1) {
+      const inserted = db.insertLog(processedEntries[0], maxLogs);
+      events.emit('log', inserted);
+      return {
+        success: true,
+        log: inserted,
+      };
+    } else {
+      const insertedList = db.insertLogsBatch(processedEntries, maxLogs);
+      for (const inserted of insertedList) {
+        events.emit('log', inserted);
+      }
+      return {
+        success: true,
+        count: insertedList.length,
+        logs: insertedList,
+      };
+    }
   });
 
   return {

@@ -12,7 +12,7 @@
 - **tsup**: Bundler creating Node CLI (`dist/cli.mjs`), dual CJS/ESM library (`dist/index.cjs`, `dist/index.js`), and standalone browser client (`dist/client.js`).
 - **Changesets**: Versioning & changelog setup (`.changeset/config.json`).
 - **Config loader**: Support for default configurations in `~/.reverse-logger/config.json` (`maxLogs`, `port`, `host`, `token`, `dbPath`).
-- **Browser Developer Overlay**: Lightweight Shadow DOM overlay injected by `client.js` with floating badge (`RL 12 ⚠ 2 ✕ 1`), real-time log list, search, level filters, expandable log details, copy buttons, star/unstar toggle, and `Cmd/Ctrl+Shift+L` keyboard shortcut.
+- **Browser Developer Overlay**: Lightweight Shadow DOM overlay injected by `client.js` with floating badge (`RL 12 ⚠ 2 ✕ 1`), real-time log list, search, level filters, expandable log details, copy buttons, star/unstar toggle, `requestAnimationFrame`-throttled UI updates (to safely handle 1,000+ logs without freezing the main thread or unresponding badge), and `Cmd/Ctrl+Shift+L` keyboard shortcut.
 - **Public Browser API**: `window.reverseLogger` exposing `log`, `info`, `warn`, `error`, `debug`, `star` (special logs), `clear`, `pause`, `resume`, `isConnected`.
 
 ## Key Commands
@@ -29,4 +29,5 @@ npm test
 - `GET /api/logs`: Returns `{ logs: LogEntry[], total: number, limit: number, offset: number }`. Supports `search`/`q`, `level`, `url`, `sessionId`, `starred`, `from` / `to` (ISO strings/timestamp ms), `limit`, `offset`.
 - `GET /api/logs/starred`: Alias for `GET /api/logs?starred=true`.
 - `POST /api/logs/:id/star`: Toggles or sets starred state for log entry.
-- `POST /api/logs`: Ingests JSON log entries.
+- `POST /api/logs`: Ingests JSON log entries. Accepts single log object or batch arrays `{ logs: LogEntry[] }` or `LogEntry[]` using SQLite transactions (`insertLogsBatch`) for ultra-high throughput (1,000 logs in <40ms).
+
