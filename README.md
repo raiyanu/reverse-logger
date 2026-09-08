@@ -220,6 +220,30 @@ Run full test suite:
 npm test
 ```
 
+## Feature Comparison
+
+There are a few tools solving parts of the browser-to-terminal debugging problem. Here's how Reverse Logger compares:
+
+| Feature                     | Reverse Logger | Local Lens | Console Bridge | Chrome DevTools CLI |
+| -----------------------------| :--------------:| :----------:| :--------------:| :-------------------:|
+| Browser console → terminal  | ✅              | ✅          | ✅              | ✅                   |
+| Browser errors & exceptions | ✅              | ✅          | ✅              | ✅                   |
+| Network events              | ✅              | ✅          | ✅              | ✅                   |
+| Server logs                 | ✅              | ✅          | —              | —                   |
+| Live terminal UI            | ✅              | —          | ✅              | ✅                   |
+| Web dashboard               | ✅              | —          | —              | —                   |
+| Browser overlay             | ✅              | —          | —              | —                   |
+| SQLite persistence          | ✅              | —          | —              | —                   |
+| REST API                    | ✅              | —          | —              | —                   |
+| AI-agent integration        | ✅              | ✅          | —              | —                   |
+| Fully local                 | ✅              | ✅          | ✅              | ✅                   |
+
+
+**Reverse Logger brings these pieces together** into a single local development tool, with browser logs, server logs, persistence, multiple interfaces, and an API designed to make runtime information accessible to AI coding agents.
+
+**References:** [Local Lens](https://github.com/aotakeda/local-lens) · [Console Bridge](https://chromewebstore.google.com/detail/console-bridge/jingljafbckmojgdajebiopamenohgjb) · [Chrome DevTools CLI](https://github.com/aeroxy/chrome-devtools-cli)
+
+
 ## License
 
 MIT
