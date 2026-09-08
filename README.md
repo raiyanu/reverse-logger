@@ -246,20 +246,20 @@ There are a few tools solving parts of the browser-to-terminal debugging problem
 
 ## 🚀 Future Plans
 
-Reverse Logger is still evolving. Some things on the roadmap:
+Reverse Logger is actively evolving. Here's what's planned:
 
-- [ ] **Automatic browser error capture** — uncaught exceptions, unhandled promise rejections, `window.onerror`, and resource failures.
-- [ ] **Network monitoring** — capture `fetch` / XHR requests, responses, failures, status codes, and timing.
-- [ ] **Request correlation** — connect browser → network → server logs using request/trace IDs.
-- [ ] **AI-friendly debug context** — a dedicated API that gives agents a concise snapshot of what's currently going wrong.
-- [ ] **MCP server** — let AI coding agents query Reverse Logger directly through MCP.
-- [ ] **JSON CLI output** — make logs easy to consume from scripts and AI agents.
-- [ ] **Incident grouping** — automatically group related errors, failed requests, and server logs into a single incident.
-- [ ] **Sensitive data redaction** — automatically redact passwords, tokens, cookies, authorization headers, and other sensitive values.
-- [ ] **Better AI-agent workflows** — make it easier for agents to observe, reproduce, and diagnose runtime issues.
-- [ ] **Improved debugging experience** — continue improving the TUI, dashboard, browser overlay, filtering, and search.
+* [ ] **Automatic error capture** — Capture uncaught exceptions, unhandled promise rejections, and browser runtime errors without requiring manual `RLogger` calls.
+* [ ] **Network monitoring** — Capture `fetch` / XHR requests, response status, failures, and request duration.
+* [ ] **Request tracing** — Correlate browser logs, network requests, and server logs using request/trace IDs.
+* [ ] **AI Debug Context API** — Provide agents with a ready-to-use snapshot of recent errors, failed requests, sessions, and relevant logs.
+* [ ] **MCP Support** — Expose Reverse Logger directly to AI coding agents through MCP.
+* [ ] **Agent-friendly CLI** — Add structured JSON output and commands designed for programmatic/LLM consumption.
+* [ ] **Incident grouping** — Automatically group related errors, requests, and logs into a single debugging incident.
+* [ ] **Sensitive data redaction** — Automatically redact passwords, tokens, cookies, authorization headers, and other sensitive values.
+* [ ] **Improved AI workflows** — Make it easier for coding agents to observe runtime behavior, investigate failures, and verify fixes.
+* [ ] **More integrations** — Better support for popular frameworks, development servers, and AI coding assistants.
 
-> The long-term goal is to make Reverse Logger a **local runtime observability layer for AI-assisted development** — giving coding agents the context they need to understand what is actually happening inside your application while saving the tokens consumed during sandbox browser runs.
+> **Long term:** Make Reverse Logger the runtime context layer between your application and AI coding agents — so agents can see not only the code, but what the application is actually doing at runtime.
 
 
 ## License
