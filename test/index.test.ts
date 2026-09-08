@@ -298,6 +298,50 @@ async function runAllTests() {
     await server.close();
   }
 
+  // --- Test Suite 8: Database Flush Option (--flush & DELETE /api/logs) ---
+  {
+    console.log('8. Testing Database Flush Option (--flush & DELETE /api/logs)...');
+    const dbPath = path.join(testDbDir, 'test8.db');
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+
+    const port = 5108;
+    // Step 1: Create initial server and populate data
+    const server1 = createServer({ port, dbPath });
+    await server1.listen(port);
+    await fetch(`http://127.0.0.1:${port}/api/logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Pre-existing log' }),
+    });
+    const check1 = await fetch(`http://127.0.0.1:${port}/api/logs`);
+    const data1 = await check1.json();
+    assert(data1.total === 1, 'Server 1 should have 1 log record');
+    await server1.close();
+
+    // Step 2: Start server with flush: true -> should clear all existing logs on startup
+    const server2 = createServer({ port, dbPath, flush: true });
+    await server2.listen(port);
+    const check2 = await fetch(`http://127.0.0.1:${port}/api/logs`);
+    const data2 = await check2.json();
+    assert(data2.total === 0, 'Server 2 with flush: true should start with 0 logs');
+
+    // Populate a log and test DELETE /api/logs endpoint
+    await fetch(`http://127.0.0.1:${port}/api/logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Temporary log' }),
+    });
+    const delRes = await fetch(`http://127.0.0.1:${port}/api/logs`, { method: 'DELETE' });
+    assert(delRes.status === 200, 'DELETE /api/logs should return status 200');
+
+    const check3 = await fetch(`http://127.0.0.1:${port}/api/logs`);
+    const data3 = await check3.json();
+    assert(data3.total === 0, 'Database should be empty after DELETE /api/logs');
+
+    console.log('   ✓ Database Flush Options & DELETE /api/logs OK');
+    await server2.close();
+  }
+
   // Clean test databases
   try {
     fs.rmSync(testDbDir, { recursive: true, force: true });
@@ -305,7 +349,7 @@ async function runAllTests() {
     // ignore
   }
 
-  console.log('\n🎉 ALL 7 EXPANDED TEST SUITES PASSED CLEANLY!\n');
+  console.log('\n🎉 ALL 8 EXPANDED TEST SUITES PASSED CLEANLY!\n');
 }
 
 runAllTests().catch((err) => {

@@ -244,6 +244,16 @@ export class LoggerDatabase {
     stmtPayloads.run();
   }
 
+  public clearAllLogs(): void {
+    this.db.exec('DELETE FROM log_payloads;');
+    this.db.exec('DELETE FROM logs;');
+    try {
+      this.db.exec('DELETE FROM sqlite_sequence WHERE name IN ("logs", "log_payloads");');
+    } catch {
+      // ignore sequence reset error if table hasn't autoincremented yet
+    }
+  }
+
   public getLogPayload(logId: number): LogPayloadDetail | null {
     const stmtPayload = this.db.prepare('SELECT * FROM log_payloads WHERE log_id = ?');
     const payloadRow = stmtPayload.get(logId) as { full_message: string; full_args: string; full_stack: string | null; payload_size: number } | undefined;

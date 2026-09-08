@@ -31,5 +31,6 @@ npm test
 - `POST /api/logs/:id/star`: Toggles or sets starred state for log entry.
 - `POST /api/logs`: Ingests JSON log entries up to 20MB. Accepts single log object or batch arrays `{ logs: LogEntry[] }` or `LogEntry[]` using SQLite transactions (`insertLogsBatch`) for ultra-high throughput (1,000 logs in <40ms). Logs >32KB store a truncated preview in `logs` and full payload in `log_payloads`.
 - `GET /api/logs/:id/payload`: Retrieves full un-truncated payload (`{ success: true, payload: { logId, message, args, stack, payloadSize } }`) for large log entries on-demand.
+- `DELETE /api/logs`: Flushes away all existing logs from the database. Triggered on server start with CLI flag `--flush` (aliases: `--fresh`, `--clean`).
 
 

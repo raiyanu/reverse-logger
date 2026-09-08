@@ -20,6 +20,9 @@ program
   .option('--port <number>', 'Starting port number to bind server')
   .option('--host <string>', 'Host interface address to bind server')
   .option('--token <string>', 'Optional Bearer authentication token for API access')
+  .option('--flush', 'Flush away all existing logs on startup and start with a fresh database')
+  .option('--fresh', 'Alias for --flush')
+  .option('--clean', 'Alias for --flush')
   .action(async (options) => {
     try {
       const cliOptions = {
@@ -27,6 +30,7 @@ program
         port: options.port ? parseInt(options.port, 10) : undefined,
         host: options.host || undefined,
         token: options.token || undefined,
+        flush: Boolean(options.flush || options.fresh || options.clean),
       };
 
       const resolvedConfig = resolveServerOptions(cliOptions);
@@ -52,6 +56,7 @@ program
         maxLogs: resolvedConfig.maxLogs,
         token: resolvedConfig.token,
         dbPath: resolvedConfig.dbPath,
+        flush: resolvedConfig.flush,
       });
 
       await server.listen(port, host);

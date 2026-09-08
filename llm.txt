@@ -112,11 +112,12 @@ reverse-logger serve [options]
 - `--port <number>`: Starting port to bind server (default: `5050`).
 - `--host <string>`: Network host address to bind (default: `0.0.0.0`).
 - `--token <string>`: Optional Bearer authentication token for API protection.
+- `--flush` / `--fresh` / `--clean`: Flush away all existing logs on startup and start with a fresh database.
 
-Example with token and custom log limit:
+Example starting server with a fresh database:
 
 ```bash
-npx reverse-logger serve --token my_secret_token --max-logs 50000
+npx reverse-logger serve --flush
 ```
 
 ---
@@ -130,7 +131,8 @@ Set default server options globally by creating `~/.reverse-logger/config.json`:
   "maxLogs": 10000,
   "port": 5050,
   "host": "0.0.0.0",
-  "token": "my_secret_token"
+  "token": "my_secret_token",
+  "flush": false
 }
 ```
 
@@ -285,6 +287,12 @@ GET /api/logs/starred
 GET /api/logs/:id/payload
 ```
 Returns `{ "success": true, "payload": { "logId": 42, "message": "...", "args": [...], "stack": "...", "payloadSize": 3145728 } }`.
+
+### Flush All Logs (Reset Database)
+```text
+DELETE /api/logs
+```
+Flushes away all stored log entries and resets database sequence. Returns `{ "success": true, "message": "All logs flushed successfully" }`.
 
 ### Toggle Star Status
 ```text

@@ -121,6 +121,11 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
     bodyLimit: 20 * 1024 * 1024, // 20 MB payload limit for large logs
   });
   const db = new LoggerDatabase(options.dbPath);
+
+  if (options.flush) {
+    db.clearAllLogs();
+  }
+
   const events = new EventEmitter();
   const maxLogs = options.maxLogs ?? 10000;
   const token = options.token;
@@ -270,6 +275,13 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
       success: true,
       payload,
     };
+  });
+
+  // DELETE /api/logs - Flush away all logs from database
+  app.delete('/api/logs', async (request, reply) => {
+    db.clearAllLogs();
+    events.emit('clear');
+    return { success: true, message: 'All logs flushed successfully' };
   });
 
   // GET /api/logs

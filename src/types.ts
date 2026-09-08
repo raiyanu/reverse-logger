@@ -50,6 +50,7 @@ export interface ServerOptions {
   maxLogs?: number;
   token?: string;
   dbPath?: string;
+  flush?: boolean;
 }
 
 export interface ConfigOptions {
@@ -58,6 +59,7 @@ export interface ConfigOptions {
   maxLogs?: number;
   token?: string;
   dbPath?: string;
+  flush?: boolean;
 }
 
 export interface LogQueryOptions {

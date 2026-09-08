@@ -123,6 +123,7 @@ reverse-logger serve [options]
 | `--port <number>` | Starting port number to bind server | `5050` |
 | `--host <string>` | Host interface address | `0.0.0.0` |
 | `--token <string>` | Optional Bearer authentication token for API access | `undefined` |
+| `--flush` | Flush away all existing logs on startup and start with a fresh database (aliases: `--fresh`, `--clean`) | `false` |
 
 ### TUI Controls
 
@@ -139,7 +140,8 @@ reverse-logger serve [options]
   "maxLogs": 10000,
   "port": 5050,
   "host": "0.0.0.0",
-  "token": "my_secret_token"
+  "token": "my_secret_token",
+  "flush": false
 }
 ```
 
@@ -189,13 +191,19 @@ GET /api/logs/:id/payload
 ```
 Returns `{ success: true, payload: { logId, message, args, stack, payloadSize } }`.
 
-### 5. Toggle Starred State
+### 5. Flush All Logs (Reset Database)
+```text
+DELETE /api/logs
+```
+Flushes away all stored log entries and resets database sequence. Returns `{ success: true, message: "All logs flushed successfully" }`.
+
+### 6. Toggle Starred State
 ```text
 POST /api/logs/:id/star
 ```
 Payload: `{ "starred": true }` or `{ "starred": false }`. Toggles state if body is empty.
 
-### 6. Ingest Log Entries (Single or Batch)
+### 7. Ingest Log Entries (Single or Batch)
 ```text
 POST /api/logs
 ```

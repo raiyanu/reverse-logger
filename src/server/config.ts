@@ -29,5 +29,6 @@ export function resolveServerOptions(cliOptions: ServerOptions = {}): ServerOpti
     maxLogs: cliOptions.maxLogs ?? fileConfig.maxLogs ?? 10000,
     token: cliOptions.token ?? fileConfig.token ?? undefined,
     dbPath: cliOptions.dbPath ?? fileConfig.dbPath ?? undefined,
+    flush: cliOptions.flush ?? fileConfig.flush ?? false,
   };
 }
