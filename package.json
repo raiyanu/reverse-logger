@@ -1,6 +1,6 @@
 {
   "name": "reverse-logger",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Local reverse logger server receiving browser console logs with TUI and SQLite storage",
   "type": "module",
   "main": "./dist/index.cjs",

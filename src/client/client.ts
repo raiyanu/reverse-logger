@@ -83,6 +83,8 @@
   const MAX_QUEUE_SIZE = 5000;
   const BATCH_SIZE = 100;
   const MAX_STRING_LEN = 500000;
+  const MAX_OBJECT_KEYS = 100;
+  const MAX_RECURSION_DEPTH = 6;
 
   // Throttled UI overlay updates (max once per animation frame)
   let overlayUpdateScheduled = false;
@@ -106,48 +108,102 @@
   let warnCount = 0;
   let errorCount = 0;
 
-  function safeSerialize(obj: any): any {
-    const cache = new WeakSet();
-    const jsonStr = JSON.stringify(obj, (key, value) => {
-      if (typeof value === 'object' && value !== null) {
-        if (cache.has(value)) {
-          return '[Circular]';
-        }
-        cache.add(value);
+  // Fast single-pass serializer without JSON.parse roundtrips or V8 stack frame overhead
+  function fastSerialize(obj: any, depth = 0, seen = new WeakSet()): any {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+    const type = typeof obj;
+    if (type === 'number' || type === 'boolean') {
+      return obj;
+    }
+    if (type === 'string') {
+      if (obj.length > MAX_STRING_LEN) {
+        return obj.substring(0, MAX_STRING_LEN) + '... [truncated]';
       }
-      if (value instanceof Error) {
-        return {
-          name: value.name,
-          message: value.message,
-          stack: value.stack,
-        };
-      }
-      if (typeof Element !== 'undefined' && value instanceof Element) {
-        return `<${value.tagName.toLowerCase()}${value.id ? '#' + value.id : ''}${value.className ? '.' + String(value.className).replace(/\s+/g, '.') : ''}>`;
-      }
-      if (typeof value === 'function') {
-        return `[Function: ${value.name || 'anonymous'}]`;
-      }
-      if (typeof value === 'string' && value.length > MAX_STRING_LEN) {
-        return value.substring(0, MAX_STRING_LEN) + '... [truncated]';
-      }
-      return value;
-    });
+      return obj;
+    }
+    if (type === 'function') {
+      return `[Function: ${obj.name || 'anonymous'}]`;
+    }
+    if (type === 'symbol') {
+      return obj.toString();
+    }
+    if (type === 'bigint') {
+      return obj.toString() + 'n';
+    }
 
-    return JSON.parse(jsonStr);
+    if (depth > MAX_RECURSION_DEPTH) {
+      return '[Max Depth Reached]';
+    }
+
+    if (typeof Element !== 'undefined' && obj instanceof Element) {
+      return `<${obj.tagName.toLowerCase()}${obj.id ? '#' + obj.id : ''}${obj.className ? '.' + String(obj.className).replace(/\s+/g, '.') : ''}>`;
+    }
+
+    if (obj instanceof Error) {
+      return {
+        name: obj.name,
+        message: obj.message,
+        stack: obj.stack,
+      };
+    }
+
+    if (seen.has(obj)) {
+      return '[Circular]';
+    }
+    seen.add(obj);
+
+    if (Array.isArray(obj)) {
+      const arrLen = Math.min(obj.length, 100);
+      const resArr: any[] = new Array(arrLen);
+      for (let i = 0; i < arrLen; i++) {
+        try {
+          resArr[i] = fastSerialize(obj[i], depth + 1, seen);
+        } catch {
+          resArr[i] = '[Unserializable]';
+        }
+      }
+      if (obj.length > 100) {
+        resArr.push(`... +${obj.length - 100} more items`);
+      }
+      return resArr;
+    }
+
+    const resObj: Record<string, any> = {};
+    const keys = Object.keys(obj);
+    const keyCount = Math.min(keys.length, MAX_OBJECT_KEYS);
+    for (let i = 0; i < keyCount; i++) {
+      const k = keys[i];
+      try {
+        resObj[k] = fastSerialize(obj[k], depth + 1, seen);
+      } catch {
+        resObj[k] = '[Unserializable]';
+      }
+    }
+    if (keys.length > MAX_OBJECT_KEYS) {
+      resObj['__truncated_keys__'] = `+${keys.length - MAX_OBJECT_KEYS} more keys`;
+    }
+    return resObj;
   }
 
-  function extractStack(args: any[]): string | undefined {
-    for (const arg of args) {
+  function extractStack(args: any[], level: string): string | undefined {
+    // 1. If an Error object was passed as an argument, use its stack trace directly (0 cost)
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
       if (arg instanceof Error && arg.stack) {
         return arg.stack;
       }
     }
-    const stackErr = new Error();
-    if (stackErr.stack) {
-      const lines = stackErr.stack.split('\n');
-      const filtered = lines.filter((line) => !line.includes('client.js') && !line.includes('safeSerialize'));
-      return filtered.join('\n');
+    // 2. Only generate synthetic stack traces for explicit error or special starred logs.
+    // NEVER generate synthetic stack traces for high-frequency standard log/info/debug/warn calls!
+    if (level === 'error' || level === 'special') {
+      const stackErr = new Error();
+      if (stackErr.stack) {
+        const lines = stackErr.stack.split('\n');
+        const filtered = lines.filter((line) => !line.includes('client.js') && !line.includes('fastSerialize'));
+        return filtered.join('\n');
+      }
     }
     return undefined;
   }
@@ -159,12 +215,20 @@
       queue.shift();
     }
     queue.push(payload);
-    scheduleFlush();
+    if (queue.length >= BATCH_SIZE) {
+      scheduleFlush(0);
+    } else {
+      scheduleFlush(250);
+    }
   }
 
-  function scheduleFlush(delay: number = 0) {
+  function scheduleFlush(delay: number = 250) {
     if (isSending || queue.length === 0) return;
     if (delay === 0) {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
       flushQueue();
     } else if (!flushTimer) {
       flushTimer = setTimeout(() => {
@@ -220,30 +284,41 @@
       .finally(() => {
         isSending = false;
         if (queue.length > 0) {
-          scheduleFlush(50);
+          scheduleFlush(queue.length >= BATCH_SIZE ? 0 : 250);
         }
       });
   }
 
   function captureLog(level: string, rawArgs: any[], extra?: { message?: string; starred?: boolean; source?: string }) {
     try {
-      const serializedArgs = rawArgs.map((arg) => safeSerialize(arg));
-      const stack = extractStack(rawArgs);
+      const normalizedLevel = level.toLowerCase();
+      const serializedArgs = rawArgs.map((arg) => fastSerialize(arg));
+      const stack = extractStack(rawArgs, normalizedLevel);
 
       let msg = extra?.message;
       if (!msg) {
-        msg = rawArgs
-          .map((a) => (typeof a === 'object' ? JSON.stringify(safeSerialize(a)) : String(a)))
+        msg = serializedArgs
+          .map((a) => {
+            if (typeof a === 'string') return a;
+            if (typeof a === 'object' && a !== null) {
+              try {
+                return JSON.stringify(a);
+              } catch {
+                return '[Object]';
+              }
+            }
+            return String(a);
+          })
           .join(' ');
       }
 
       const isStarred = Boolean(extra?.starred);
-      const source = extra?.source || (level === 'special' ? 'reverseLogger' : 'console');
+      const source = extra?.source || (normalizedLevel === 'special' ? 'reverseLogger' : 'console');
 
       const logItem = {
         id: logIdCounter++,
         timestamp: new Date().toISOString(),
-        level: level.toLowerCase(),
+        level: normalizedLevel,
         message: msg,
         args: serializedArgs,
         url: typeof window !== 'undefined' ? window.location.href : '',
@@ -254,12 +329,12 @@
         source,
       };
 
-      if (level.toLowerCase() === 'warn') warnCount++;
-      if (level.toLowerCase() === 'error') errorCount++;
+      if (normalizedLevel === 'warn') warnCount++;
+      if (normalizedLevel === 'error') errorCount++;
 
       if (!isPaused) {
         localLogs.unshift(logItem);
-        if (localLogs.length > 500) localLogs.pop();
+        if (localLogs.length > 300) localLogs.pop();
       }
 
       scheduleOverlayUpdate();
@@ -475,28 +550,40 @@
     updateOverlayUI();
   }
 
+  let lastBadgeText = '';
+  let lastOnlineState = false;
+
   function updateOverlayUI() {
     if (!shadowRoot) return;
 
-    // Render Badge
+    // Render Badge efficiently without unnecessary innerHTML clears
     if (badgeEl) {
-      badgeEl.innerHTML = '';
-      const dot = document.createElement('span');
-      dot.className = `rl-status-dot ${isConnected ? 'online' : 'offline'}`;
-      badgeEl.appendChild(dot);
+      const badgeText = `RL ${localLogs.length}${warnCount > 0 ? '  ⚠ ' + warnCount : ''}${errorCount > 0 ? '  ✕ ' + errorCount : ''}`;
+      if (badgeText !== lastBadgeText || isConnected !== lastOnlineState) {
+        lastBadgeText = badgeText;
+        lastOnlineState = isConnected;
 
-      const label = document.createElement('span');
-      label.textContent = `RL ${localLogs.length}${warnCount > 0 ? '  ⚠ ' + warnCount : ''}${errorCount > 0 ? '  ✕ ' + errorCount : ''}`;
-      badgeEl.appendChild(label);
+        badgeEl.innerHTML = '';
+        const dot = document.createElement('span');
+        dot.className = `rl-status-dot ${isConnected ? 'online' : 'offline'}`;
+        badgeEl.appendChild(dot);
+
+        const label = document.createElement('span');
+        label.textContent = badgeText;
+        badgeEl.appendChild(label);
+      }
     }
 
-    // Render Panel
+    // Short-circuit: skip panel DOM creation completely when panel is closed!
     if (panelEl) {
-      panelEl.className = `rl-panel ${isPanelOpen ? 'open' : ''}`;
       if (!isPanelOpen) {
-        panelEl.innerHTML = '';
+        if (panelEl.classList.contains('open')) {
+          panelEl.className = 'rl-panel';
+          panelEl.innerHTML = '';
+        }
         return;
       }
+      panelEl.className = 'rl-panel open';
       panelEl.innerHTML = '';
 
       // Header
