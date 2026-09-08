@@ -2,6 +2,9 @@
 
 > Production-ready local reverse logger server that receives browser console logs and displays/stores them in a live terminal UI, standalone browser developer overlay, and web dashboard with SQLite database.
 
+![R-logger Image](docs/rloggerImage.png)
+
+
 ## 🤖 AI Agent Skill (`skills.sh`)
 
 Install this skill into your AI Coding Assistant (Antigravity, Cursor, Claude Code, Windsurf, etc.) via `skills.sh`:
