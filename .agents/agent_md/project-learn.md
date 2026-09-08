@@ -29,5 +29,7 @@ npm test
 - `GET /api/logs`: Returns `{ logs: LogEntry[], total: number, limit: number, offset: number }`. Supports `search`/`q`, `level`, `url`, `sessionId`, `starred`, `from` / `to` (ISO strings/timestamp ms), `limit`, `offset`.
 - `GET /api/logs/starred`: Alias for `GET /api/logs?starred=true`.
 - `POST /api/logs/:id/star`: Toggles or sets starred state for log entry.
-- `POST /api/logs`: Ingests JSON log entries. Accepts single log object or batch arrays `{ logs: LogEntry[] }` or `LogEntry[]` using SQLite transactions (`insertLogsBatch`) for ultra-high throughput (1,000 logs in <40ms).
+- `POST /api/logs`: Ingests JSON log entries up to 20MB. Accepts single log object or batch arrays `{ logs: LogEntry[] }` or `LogEntry[]` using SQLite transactions (`insertLogsBatch`) for ultra-high throughput (1,000 logs in <40ms). Logs >32KB store a truncated preview in `logs` and full payload in `log_payloads`.
+- `GET /api/logs/:id/payload`: Retrieves full un-truncated payload (`{ success: true, payload: { logId, message, args, stack, payloadSize } }`) for large log entries on-demand.
+
 

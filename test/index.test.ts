@@ -244,6 +244,60 @@ async function runAllTests() {
     await server.close();
   }
 
+  // --- Test Suite 7: 3MB+ Large Log Payload Storage Strategy & Endpoint ---
+  {
+    console.log('7. Testing 3MB+ Large Log Payload Storage Strategy & Endpoint...');
+    const dbPath = path.join(testDbDir, 'test7.db');
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+
+    const port = 5107;
+    const server = createServer({ port, maxLogs: 100, dbPath });
+    await server.listen(port);
+
+    // Generate a 3MB string payload
+    const largeContent = 'X'.repeat(3 * 1024 * 1024); // 3 MB string
+    const startTime = Date.now();
+
+    const postRes = await fetch(`http://127.0.0.1:${port}/api/logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        level: 'warn',
+        message: largeContent,
+        args: ['Large payload test', { blob: largeContent }],
+        url: 'http://app.local/large-payload',
+        sessionId: 'sess_large_3mb',
+      }),
+    });
+
+    const duration = Date.now() - startTime;
+    assert(postRes.status === 200, 'POST 3MB log should return status 200');
+
+    const postData = await postRes.json();
+    assert(postData.success === true, 'postData.success should be true');
+    const insertedLog = postData.log;
+    assert(insertedLog.isLarge === true, 'insertedLog.isLarge should be true');
+    assert(insertedLog.payloadSize >= 3000000, `payloadSize should be >= 3MB, got ${insertedLog.payloadSize}`);
+    assert(insertedLog.message.endsWith('... [preview]'), 'Primary message should be truncated preview');
+
+    // Query list API - primary list returns lightweight preview without 3MB bloat
+    const getRes = await fetch(`http://127.0.0.1:${port}/api/logs?limit=1`);
+    const getData = await getRes.json();
+    assert(getData.logs.length === 1, 'GET /api/logs should return 1 record');
+    assert(getData.logs[0].isLarge === true, 'List entry should be marked as isLarge');
+
+    // Query on-demand payload API /api/logs/:id/payload - returns full un-truncated 3MB content
+    const payloadRes = await fetch(`http://127.0.0.1:${port}/api/logs/${insertedLog.id}/payload`);
+    assert(payloadRes.status === 200, 'GET /api/logs/:id/payload should return status 200');
+
+    const payloadData = await payloadRes.json();
+    assert(payloadData.success === true, 'payloadData.success should be true');
+    assert(payloadData.payload.message.length === 3 * 1024 * 1024, 'Full payload message length should be 3MB');
+
+    console.log(`   ✓ Ingested and stored 3MB payload in Tiered Storage in ${duration}ms OK`);
+    await server.close();
+  }
+
   // Clean test databases
   try {
     fs.rmSync(testDbDir, { recursive: true, force: true });
@@ -251,7 +305,7 @@ async function runAllTests() {
     // ignore
   }
 
-  console.log('\n🎉 ALL 6 EXPANDED TEST SUITES PASSED CLEANLY!\n');
+  console.log('\n🎉 ALL 7 EXPANDED TEST SUITES PASSED CLEANLY!\n');
 }
 
 runAllTests().catch((err) => {

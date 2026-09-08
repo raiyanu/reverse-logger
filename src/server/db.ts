@@ -2,7 +2,9 @@ import Database from 'better-sqlite3';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
-import { LogEntry, LogQueryOptions, RawLogRecord } from '../types';
+import { LogEntry, LogPayloadDetail, LogQueryOptions, RawLogRecord } from '../types';
+
+const LARGE_PAYLOAD_THRESHOLD = 32 * 1024; // 32 KB threshold for offloading to log_payloads
 
 export class LoggerDatabase {
   private db: Database.Database;
@@ -19,7 +21,7 @@ export class LoggerDatabase {
   }
 
   private initSchemaAndMigrate(): void {
-    // Ensure table exists
+    // Ensure logs table exists
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +36,21 @@ export class LoggerDatabase {
         session_id TEXT,
         starred INTEGER DEFAULT 0,
         source TEXT DEFAULT 'console',
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        is_large INTEGER DEFAULT 0,
+        payload_size INTEGER DEFAULT 0
+      );
+    `);
+
+    // Ensure dedicated log_payloads table for large log payloads (>32KB)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS log_payloads (
+        log_id INTEGER PRIMARY KEY,
+        full_message TEXT NOT NULL,
+        full_args TEXT NOT NULL,
+        full_stack TEXT,
+        payload_size INTEGER NOT NULL,
+        FOREIGN KEY(log_id) REFERENCES logs(id) ON DELETE CASCADE
       );
     `);
 
@@ -59,6 +75,12 @@ export class LoggerDatabase {
     if (!columnNames.has('source')) {
       this.db.exec("ALTER TABLE logs ADD COLUMN source TEXT DEFAULT 'console';");
     }
+    if (!columnNames.has('is_large')) {
+      this.db.exec('ALTER TABLE logs ADD COLUMN is_large INTEGER DEFAULT 0;');
+    }
+    if (!columnNames.has('payload_size')) {
+      this.db.exec('ALTER TABLE logs ADD COLUMN payload_size INTEGER DEFAULT 0;');
+    }
 
     // Ensure indexes
     this.db.exec(`
@@ -70,73 +92,8 @@ export class LoggerDatabase {
   }
 
   public insertLog(entry: Partial<LogEntry>, maxLogs: number = 10000): LogEntry {
-    const nowMs = Date.now();
-    let tsMs = nowMs;
-
-    if (entry.timestamp) {
-      const parsed = Date.parse(entry.timestamp);
-      if (!isNaN(parsed)) {
-        tsMs = parsed;
-      } else if (typeof entry.timestamp === 'number') {
-        tsMs = entry.timestamp;
-      }
-    }
-
-    const isoTimestamp = new Date(tsMs).toISOString();
-    const isoCreatedAt = new Date(nowMs).toISOString();
-    const argsArray = Array.isArray(entry.args) ? entry.args : [entry.args ?? ''];
-
-    let messageStr = entry.message;
-    if (!messageStr) {
-      messageStr = argsArray
-        .map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a)))
-        .join(' ');
-    }
-
-    const argsJson = JSON.stringify(argsArray);
-    const isStarred = entry.starred ? 1 : 0;
-    const logSource = entry.source || 'console';
-
-    const stmt = this.db.prepare(`
-      INSERT INTO logs (timestamp, timestamp_ms, level, message, args, url, stack, user_agent, session_id, starred, source, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const info = stmt.run(
-      isoTimestamp,
-      tsMs,
-      entry.level ? entry.level.toLowerCase() : 'info',
-      messageStr,
-      argsJson,
-      entry.url || null,
-      entry.stack || null,
-      entry.userAgent || null,
-      entry.sessionId || null,
-      isStarred,
-      logSource,
-      isoCreatedAt
-    );
-
-    const insertedId = info.lastInsertRowid as number;
-
-    if (maxLogs > 0) {
-      this.truncateLogs(maxLogs);
-    }
-
-    return {
-      id: insertedId,
-      timestamp: isoTimestamp,
-      level: entry.level ? entry.level.toLowerCase() : 'info',
-      message: messageStr,
-      args: argsArray,
-      url: entry.url || undefined,
-      stack: entry.stack || undefined,
-      userAgent: entry.userAgent || undefined,
-      sessionId: entry.sessionId || undefined,
-      starred: Boolean(isStarred),
-      source: logSource as any,
-      createdAt: isoCreatedAt,
-    };
+    const batch = this.insertLogsBatch([entry], maxLogs);
+    return batch[0];
   }
 
   public insertLogsBatch(entries: Partial<LogEntry>[], maxLogs: number = 10000): LogEntry[] {
@@ -144,9 +101,14 @@ export class LoggerDatabase {
     const nowMs = Date.now();
     const isoCreatedAt = new Date(nowMs).toISOString();
 
-    const stmt = this.db.prepare(`
-      INSERT INTO logs (timestamp, timestamp_ms, level, message, args, url, stack, user_agent, session_id, starred, source, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    const stmtLogs = this.db.prepare(`
+      INSERT INTO logs (timestamp, timestamp_ms, level, message, args, url, stack, user_agent, session_id, starred, source, created_at, is_large, payload_size)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const stmtPayloads = this.db.prepare(`
+      INSERT INTO log_payloads (log_id, full_message, full_args, full_stack, payload_size)
+      VALUES (?, ?, ?, ?, ?)
     `);
 
     const insertedEntries: LogEntry[] = [];
@@ -174,38 +136,74 @@ export class LoggerDatabase {
         }
 
         const argsJson = JSON.stringify(argsArray);
+        const stackStr = entry.stack || '';
         const isStarred = entry.starred ? 1 : 0;
         const logSource = entry.source || 'console';
         const lvl = entry.level ? entry.level.toLowerCase() : 'info';
 
-        const info = stmt.run(
+        const totalPayloadSize =
+          Buffer.byteLength(messageStr, 'utf8') +
+          Buffer.byteLength(argsJson, 'utf8') +
+          Buffer.byteLength(stackStr, 'utf8');
+
+        const isLarge = totalPayloadSize > LARGE_PAYLOAD_THRESHOLD;
+
+        const dbMessage = isLarge && messageStr.length > 2048
+          ? messageStr.substring(0, 2048) + '... [preview]'
+          : messageStr;
+
+        const dbArgs = isLarge && argsJson.length > 2048
+          ? argsJson.substring(0, 2048) + '... [preview]'
+          : argsJson;
+
+        const dbStack = isLarge && stackStr.length > 1024
+          ? stackStr.substring(0, 1024) + '... [preview]'
+          : stackStr || null;
+
+        const info = stmtLogs.run(
           isoTimestamp,
           tsMs,
           lvl,
-          messageStr,
-          argsJson,
+          dbMessage,
+          dbArgs,
           entry.url || null,
-          entry.stack || null,
+          dbStack,
           entry.userAgent || null,
           entry.sessionId || null,
           isStarred,
           logSource,
-          isoCreatedAt
+          isoCreatedAt,
+          isLarge ? 1 : 0,
+          totalPayloadSize
         );
 
+        const insertedId = info.lastInsertRowid as number;
+
+        if (isLarge) {
+          stmtPayloads.run(
+            insertedId,
+            messageStr,
+            argsJson,
+            stackStr || null,
+            totalPayloadSize
+          );
+        }
+
         insertedEntries.push({
-          id: info.lastInsertRowid as number,
+          id: insertedId,
           timestamp: isoTimestamp,
           level: lvl,
-          message: messageStr,
-          args: argsArray,
+          message: dbMessage,
+          args: isLarge ? [dbArgs] : argsArray,
           url: entry.url || undefined,
-          stack: entry.stack || undefined,
+          stack: dbStack || undefined,
           userAgent: entry.userAgent || undefined,
           sessionId: entry.sessionId || undefined,
           starred: Boolean(isStarred),
           source: logSource as any,
           createdAt: isoCreatedAt,
+          isLarge,
+          payloadSize: totalPayloadSize,
         });
       }
 
@@ -231,12 +229,49 @@ export class LoggerDatabase {
   }
 
   public truncateLogs(maxLogs: number): void {
-    const stmt = this.db.prepare(`
+    const stmtLogs = this.db.prepare(`
       DELETE FROM logs WHERE id NOT IN (
         SELECT id FROM logs ORDER BY id DESC LIMIT ?
       )
     `);
-    stmt.run(maxLogs);
+    stmtLogs.run(maxLogs);
+
+    const stmtPayloads = this.db.prepare(`
+      DELETE FROM log_payloads WHERE log_id NOT IN (
+        SELECT id FROM logs
+      )
+    `);
+    stmtPayloads.run();
+  }
+
+  public getLogPayload(logId: number): LogPayloadDetail | null {
+    const stmtPayload = this.db.prepare('SELECT * FROM log_payloads WHERE log_id = ?');
+    const payloadRow = stmtPayload.get(logId) as { full_message: string; full_args: string; full_stack: string | null; payload_size: number } | undefined;
+
+    if (payloadRow) {
+      return {
+        logId,
+        message: payloadRow.full_message,
+        args: this.safeParseJson(payloadRow.full_args),
+        stack: payloadRow.full_stack || undefined,
+        payloadSize: payloadRow.payload_size,
+      };
+    }
+
+    const stmtLog = this.db.prepare('SELECT * FROM logs WHERE id = ?');
+    const logRow = stmtLog.get(logId) as RawLogRecord | undefined;
+    if (!logRow) return null;
+
+    const argsParsed = this.safeParseJson(logRow.args);
+    const size = logRow.payload_size || (Buffer.byteLength(logRow.message || '', 'utf8') + Buffer.byteLength(logRow.args || '', 'utf8'));
+
+    return {
+      logId: logRow.id,
+      message: logRow.message || '',
+      args: argsParsed,
+      stack: logRow.stack || undefined,
+      payloadSize: size,
+    };
   }
 
   private buildWhereClause(options: LogQueryOptions = {}): { whereSql: string; params: any[] } {
@@ -326,6 +361,8 @@ export class LoggerDatabase {
       starred: Boolean(row.starred),
       source: (row.source as any) || 'console',
       createdAt: row.created_at || undefined,
+      isLarge: Boolean(row.is_large),
+      payloadSize: row.payload_size || 0,
     }));
   }
 

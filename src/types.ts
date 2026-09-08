@@ -14,6 +14,8 @@ export interface LogEntry {
   starred: boolean;
   source?: LogSource;
   createdAt?: string;
+  isLarge?: boolean;
+  payloadSize?: number;
 }
 
 export interface RawLogRecord {
@@ -30,6 +32,16 @@ export interface RawLogRecord {
   starred: number; // 0 or 1
   source: string | null;
   created_at: string;
+  is_large?: number;
+  payload_size?: number;
+}
+
+export interface LogPayloadDetail {
+  logId: number;
+  message: string;
+  args: unknown[];
+  stack?: string;
+  payloadSize: number;
 }
 
 export interface ServerOptions {

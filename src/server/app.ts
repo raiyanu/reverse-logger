@@ -116,7 +116,10 @@ function getDirname(): string {
 }
 
 export function createServer(options: ServerOptions = {}): ServerInstance {
-  const app = fastify({ logger: false });
+  const app = fastify({
+    logger: false,
+    bodyLimit: 20 * 1024 * 1024, // 20 MB payload limit for large logs
+  });
   const db = new LoggerDatabase(options.dbPath);
   const events = new EventEmitter();
   const maxLogs = options.maxLogs ?? 10000;
@@ -244,6 +247,28 @@ export function createServer(options: ServerOptions = {}): ServerInstance {
       success: true,
       id,
       starred: isStarred,
+    };
+  });
+
+  // GET /api/logs/:id/payload - Retrieve full un-truncated payload for large entries
+  app.get('/api/logs/:id/payload', async (request, reply) => {
+    const params = request.params as { id: string };
+    const id = parseInt(params.id, 10);
+
+    if (isNaN(id)) {
+      reply.status(400);
+      return { success: false, error: 'Invalid log ID' };
+    }
+
+    const payload = db.getLogPayload(id);
+    if (!payload) {
+      reply.status(404);
+      return { success: false, error: 'Log payload not found' };
+    }
+
+    return {
+      success: true,
+      payload,
     };
   });
 

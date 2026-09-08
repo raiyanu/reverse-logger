@@ -194,21 +194,48 @@ export function getDashboardHtml(): string {
               </div>
               <span style="font-size: 0.8rem; color: var(--text-muted);">\${escapeHtml(log.url || '')}</span>
             </div>
-            <div class="log-details" id="details-\${log.id}">
-              <div><strong>Session ID:</strong> \${escapeHtml(log.sessionId || 'N/A')}</div>
-              <div><strong>Source:</strong> \${escapeHtml(log.source || 'console')}</div>
-              <div style="margin-top: 6px;"><strong>Arguments:</strong></div>
-              <pre>\${argsStr}</pre>
-              \${log.stack ? \`<div style="margin-top: 6px; color: var(--error);"><strong>Stack Trace:</strong></div><pre style="color: var(--error);">\${escapeHtml(log.stack)}</pre>\` : ''}
-              <div style="margin-top: 10px; display: flex; gap: 8px;">
-                <button class="btn-secondary" onclick="copyLogData(\${log.id}, false)">Copy Text</button>
-                <button class="btn-secondary" onclick="copyLogData(\${log.id}, true)">Copy JSON</button>
+              <div class="log-details" id="details-\${log.id}">
+                <div><strong>Session ID:</strong> \${escapeHtml(log.sessionId || 'N/A')}</div>
+                <div><strong>Source:</strong> \${escapeHtml(log.source || 'console')}</div>
+                \${log.isLarge ? \`
+                  <div style="margin-top: 6px; padding: 6px 12px; background: rgba(234, 179, 8, 0.15); color: var(--warn); border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+                    <span>📦 Large Payload (\${log.payloadSize ? (log.payloadSize / 1024).toFixed(1) : '?'} KB)</span>
+                    <button class="btn" style="padding: 2px 8px; font-size: 0.8rem;" id="load-btn-\${log.id}" onclick="loadFullPayload(\${log.id})">Load Full Payload</button>
+                  </div>
+                \` : ''}
+                <div style="margin-top: 6px;"><strong>Arguments:</strong></div>
+                <pre id="args-\${log.id}">\${argsStr}</pre>
+                \${log.stack ? \`<div style="margin-top: 6px; color: var(--error);"><strong>Stack Trace:</strong></div><pre style="color: var(--error);" id="stack-\${log.id}">\${escapeHtml(log.stack)}</pre>\` : ''}
+                <div style="margin-top: 10px; display: flex; gap: 8px;">
+                  <button class="btn-secondary" onclick="copyLogData(\${log.id}, false)">Copy Text</button>
+                  <button class="btn-secondary" onclick="copyLogData(\${log.id}, true)">Copy JSON</button>
+                </div>
               </div>
             </div>
-          </div>
-        \`;
-      }).join('');
-    }
+          \`;
+        }).join('');
+      }
+
+      async function loadFullPayload(id) {
+        const btn = document.getElementById('load-btn-' + id);
+        if (btn) btn.textContent = 'Loading...';
+        try {
+          const res = await fetch(\`/api/logs/\${id}/payload\`);
+          const d = await res.json();
+          if (d.success && d.payload) {
+            const log = currentLogs.find(l => l.id === id);
+            if (log) {
+              log.message = d.payload.message;
+              log.args = d.payload.args;
+              if (d.payload.stack) log.stack = d.payload.stack;
+              log.isLarge = false;
+              renderLogs({ logs: currentLogs, total: currentLogs.length, limit, offset });
+            }
+          }
+        } catch (err) {
+          if (btn) btn.textContent = 'Failed';
+        }
+      }
 
     function toggleDetails(id) {
       const el = document.getElementById('details-' + id);

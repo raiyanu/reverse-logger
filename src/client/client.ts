@@ -82,7 +82,7 @@
   const queue: any[] = [];
   const MAX_QUEUE_SIZE = 5000;
   const BATCH_SIZE = 100;
-  const MAX_STRING_LEN = 10000;
+  const MAX_STRING_LEN = 500000;
 
   // Throttled UI overlay updates (max once per animation frame)
   let overlayUpdateScheduled = false;
@@ -667,6 +667,44 @@
             const sidDiv = document.createElement('div');
             sidDiv.textContent = `Session: ${log.sessionId || 'N/A'}`;
             details.appendChild(sidDiv);
+
+            if (log.isLarge) {
+              const largeBadge = document.createElement('div');
+              largeBadge.style.cssText = 'margin-top: 4px; padding: 4px 8px; background: rgba(234, 179, 8, 0.15); color: #eab308; border-radius: 4px; font-weight: 600; font-size: 10px; display: flex; align-items: center; justify-content: space-between;';
+
+              const sizeStr = log.payloadSize ? (log.payloadSize / 1024).toFixed(1) + ' KB' : 'Large';
+              const labelText = document.createElement('span');
+              labelText.textContent = `📦 Large Payload (${sizeStr})`;
+              largeBadge.appendChild(labelText);
+
+              const loadBtn = document.createElement('button');
+              loadBtn.className = 'rl-btn';
+              loadBtn.style.fontSize = '9px';
+              loadBtn.style.padding = '2px 6px';
+              loadBtn.textContent = 'Load Full Payload';
+              loadBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                loadBtn.textContent = 'Loading...';
+                const headers: Record<string, string> = {};
+                if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+                fetch(`${apiEndpoint}/${log.id}/payload`, { headers })
+                  .then((res) => res.json())
+                  .then((d) => {
+                    if (d.success && d.payload) {
+                      log.message = d.payload.message;
+                      log.args = d.payload.args;
+                      if (d.payload.stack) log.stack = d.payload.stack;
+                      log.isLarge = false;
+                      updateOverlayUI();
+                    }
+                  })
+                  .catch(() => {
+                    loadBtn.textContent = 'Failed';
+                  });
+              });
+              largeBadge.appendChild(loadBtn);
+              details.appendChild(largeBadge);
+            }
 
             const argsDiv = document.createElement('div');
             argsDiv.style.marginTop = '4px';

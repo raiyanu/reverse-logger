@@ -1,6 +1,6 @@
 # reverse-logger Application Usage Guide
 
-`reverse-logger` is a local reverse logger server and browser console monitor. It captures browser console activity and application events in real time, displaying them in a live terminal UI, an in-browser developer overlay, and an interactive web dashboard.
+`reverse-logger` is a production-ready local reverse logger server and browser console monitor. It captures browser console activity and application events in real time, displaying them in a live terminal UI, an in-browser developer overlay, an interactive web dashboard, and a local SQLite database.
 
 ### 🤖 AI Agent Skill (`skills.sh`)
 
@@ -8,6 +8,81 @@ Install into your AI Coding Assistant via `skills.sh`:
 
 ```bash
 npx skills add raiyanu/reverse-logger
+```
+
+---
+
+## 🌟 Best Recommended Usage & End-to-End Debugging Workflow
+
+Follow this complete step-by-step workflow for the most effective, zero-friction logging experience.
+
+### Step 1: Start the Reverse Logger Server
+Launch the logger server in your terminal:
+```bash
+npx reverse-logger serve --port 5050
+```
+*The server will start listening and print the client script URL (`http://localhost:5050/script/client.js`) and dashboard URL (`http://localhost:5050/logs`).*
+
+### Step 2: Inject the Client Script into Your Web Application
+Add the script tag to your web application's HTML (`index.html` or root template):
+```html
+<script src="http://localhost:5050/script/client.js"></script>
+```
+
+### Step 3: Write Minimal Tagged Console Logs
+Use standard native `console` functions prefixed with a tag like `"RLogger | "` anywhere in your codebase. Keep logging code minimal so it requires zero module imports and can be removed effortlessly:
+
+```javascript
+// Minimal, zero-dependency logging anywhere in your app code
+console.log("RLogger | Route navigate", { from: "/home", to: "/checkout" });
+console.warn("RLogger | Payment retry", { attempt: 2, gateway: "stripe" });
+console.error("RLogger | Cart sync failed", err);
+
+// Optional: Pin critical milestones using the public star API
+window.reverseLogger?.star("Checkout Completed", { orderId: "ORD-9912", total: 149.50 });
+```
+
+### Step 4: Access and Inspect Logs (4 Methods)
+
+You can view and inspect captured logs using any of the following 4 interfaces:
+
+#### Method A: In-Browser Developer Overlay (Instant On-Screen Inspection)
+- Press **`Cmd + Shift + L`** (macOS) or **`Ctrl + Shift + L`** (Windows/Linux) anywhere on your web page.
+- Toggle the panel open/close to search `"RLogger"`, filter by level (`LOG`, `WARN`, `ERROR`), or expand items to view JSON arguments, session IDs, and error stack traces.
+- For large logs (>32KB), click **"Load Full Payload"** to inspect full un-truncated content on demand.
+
+#### Method B: Interactive Terminal UI (TUI)
+- In the terminal running `reverse-logger serve`:
+  - Press `1`-`5` to filter by level (`ALL`, `LOG`, `INFO`, `WARN`, `ERR`).
+  - Press `p` to pause/resume the live log stream.
+  - Press `c` to copy the script URL or `t` to copy the HTML script tag.
+
+#### Method C: Web Dashboard (`http://localhost:5050/logs`)
+- Open `http://localhost:5050/logs` in any browser:
+  - Filter by tabs (**All Logs**, **⭐ Starred**, **⚠️ Errors**).
+  - Search across all text fields using the search bar (`q=RLogger`).
+  - Expand log cards, load large payloads, and copy data as text or formatted JSON.
+
+#### Method D: Programmatic REST API (Ideal for AI Agents & CLI Automation)
+- Access and query logs programmatically using HTTP endpoints:
+```bash
+# Query all logs matching 'RLogger' tag
+curl "http://localhost:5050/api/logs?q=RLogger&limit=20"
+
+# Query error logs only
+curl "http://localhost:5050/api/logs?level=error&limit=10"
+
+# Query starred logs
+curl "http://localhost:5050/api/logs/starred"
+
+# Fetch full un-truncated payload for a large log entry (e.g. log ID 42)
+curl "http://localhost:5050/api/logs/42/payload"
+```
+
+### Step 5: 1-Click Debug Cleanup
+When debugging is completed, locate and remove all debug statements across your repository with a single command:
+```bash
+grep -rn "RLogger | " src/
 ```
 
 ---
@@ -81,6 +156,24 @@ Include the token in the script URL:
 
 ---
 
+## 💡 Recommended Best Practice: Minimal Tagged Console Logging
+
+To keep application code minimal, zero-dependency, and easy to remove later, use standard native `console` methods with a distinct prefix tag such as `"RLogger | "`:
+
+```javascript
+// Minimal, zero-dependency logging anywhere in your web app
+console.log("RLogger | Route navigate", { from: "/home", to: "/checkout" });
+console.warn("RLogger | Payment retry", { attempt: 2, gateway: "stripe" });
+console.error("RLogger | Cart sync failed", err);
+```
+
+### Why This Pattern is Recommended:
+1. **Minimal & Portable Code**: Uses standard `console` calls — no imports, custom wrapper modules, or vendor lock-in.
+2. **Instant Filtering**: Search `"RLogger"` in the TUI, Web Dashboard, or API (`/api/logs?q=RLogger`) to instantly isolate your logs from noisy framework messages.
+3. **1-Click Cleanup**: Easily locate and remove all debug statements before production deployment with a simple global search for `"RLogger | "`.
+
+---
+
 ## 4. In-Browser Developer Overlay
 
 Once `/script/client.js` is loaded, a lightweight developer overlay is automatically injected into the web page.
@@ -89,7 +182,8 @@ Once `/script/client.js` is loaded, a lightweight developer overlay is automatic
 - **Floating Badge**: Positioned at bottom-right showing status (`●` connected / `○` offline), total logs, warnings (`⚠`), and errors (`✕`).
 - **Keyboard Shortcut**: Press **`Cmd + Shift + L`** (macOS) or **`Ctrl + Shift + L`** (Windows/Linux) to toggle the panel open/close.
 - **Log Panel**: Real-time log list, Search bar, Level filter, Starred logs tab, Clear view, Pause/Resume toggle.
-- **Log Inspector**: Expand any log to view arguments, URL, stack trace, session ID, star/unstar toggle, and copy log data.
+- **Log Inspector**: Expand any log to view arguments, URL, stack trace, session ID, star/unstar toggle, on-demand large payload fetch button for entries >32KB, and copy log data.
+- **High Performance & Large Payloads**: Render throttled via `requestAnimationFrame` to safely handle 1,000+ rapid logs without freezing main thread or UI overlay.
 - **Zero Style Leakage**: Isolated via Shadow DOM so it never interferes with host site CSS or layout.
 
 ---
@@ -154,7 +248,7 @@ http://<server-ip>:5050/logs
 ### Dashboard Capabilities
 - **Tabs**: `All Logs`, `⭐ Starred`, `⚠️ Errors`
 - **Search & Filters**: Search across message text, arguments, URL, stack, level, and session ID.
-- **Log Inspector**: Expand log items to inspect JSON arguments, stack traces, copy text/JSON, or toggle star state.
+- **Log Inspector**: Expand log items to inspect JSON arguments, stack traces, load full payloads on demand for large entries, copy text/JSON, or toggle star state.
 - **Pagination**: Navigate pages with Previous/Next buttons and page size selector.
 
 ---
@@ -186,17 +280,25 @@ GET /api/logs?q=auth&level=error&limit=10&offset=0
 GET /api/logs/starred
 ```
 
+### Retrieve Full Payload for Large Logs (>32KB)
+```text
+GET /api/logs/:id/payload
+```
+Returns `{ "success": true, "payload": { "logId": 42, "message": "...", "args": [...], "stack": "...", "payloadSize": 3145728 } }`.
+
 ### Toggle Star Status
 ```text
 POST /api/logs/:id/star
 ```
 Payload: `{ "starred": true }` or `{ "starred": false }`
 
-### Ingest Log
+### Ingest Logs (Single or Batch)
 ```text
 POST /api/logs
 ```
-Payload:
+Maximum HTTP payload limit: 20MB.
+
+**Single Entry Payload:**
 ```json
 {
   "level": "warn",
@@ -204,5 +306,15 @@ Payload:
   "args": ["API latency spike", { "durationMs": 1420 }],
   "url": "http://localhost:3000/dashboard",
   "sessionId": "s_a1b2c3d4e"
+}
+```
+
+**Batch Payload:**
+```json
+{
+  "logs": [
+    { "level": "info", "message": "Batch item 1" },
+    { "level": "error", "message": "Batch item 2" }
+  ]
 }
 ```

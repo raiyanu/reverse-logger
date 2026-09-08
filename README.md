@@ -18,15 +18,16 @@ npx skills use raiyanu/reverse-logger@reverse-logger
 
 ## Features
 
-- 🚀 **Zero Config CLI**: Run `npx reverse-logger serve` to start instantly.
-- 🎨 **Browser Developer Overlay**: Lightweight Shadow DOM overlay injected by `/script/client.js` with floating badge (`RL 12 ⚠ 2 ✕ 1`), real-time log list, search, level filtering, expandable log details, and copy buttons.
-- ⭐ **Starred & Special Logs API**: Public `window.reverseLogger.star(message, ...args)` API to mark important events (`level: "special"`, `starred: true`, `source: "reverseLogger"`). Star state is persisted locally and on server.
-- 📊 **Web Dashboard**: Responsive web page served at `http://localhost:5050/logs` featuring tabs for **All Logs**, **Starred**, and **Errors**, with search, level filters, time ranges, and pagination.
-- ⌨️ **TUI & Keyboard Controls**: Live terminal UI (`c` to copy script URL, `t` to copy tag, `p` to pause/resume, `q` to quit). Keyboard shortcut `Cmd/Ctrl + Shift + L` toggles browser overlay.
-- 🗄️ **Local SQLite Storage**: Saves logs in `~/.reverse-logger/logs.db` (`better-sqlite3`) with configurable retention limit (`--max-logs`). Indexed by timestamp, level, session ID, and starred status.
-- 🔑 **Optional Token Auth**: Secure log API with `--token <secret>` (or config `"token"`).
-- 🛡️ **Hardened Browser Client**: Standalone dependency-free `/script/client.js` with session tracking (`sessionId`), circular reference handling, payload size limits, and an offline retry queue.
-- ⚙️ **Config File Support**: Global configuration support at `~/.reverse-logger/config.json`.
+- ⚡ **High-Throughput Log Streaming**: Built to handle rapid bursts of logs (1,000+ entries) smoothly without freezing your browser UI or locking up application threads.
+- 📦 **Large Payload Support**: Effortlessly captures large console entries (up to 3MB+ per log) with instant on-demand full payload inspection.
+- 🎨 **Browser Developer Overlay**: Embedded floating badge and overlay panel (`Cmd/Ctrl + Shift + L`) displaying live logs, level filters, real-time search, and expandable argument details.
+- ⭐ **Starred & Special Logs API**: Use `window.reverseLogger.star(...)` to pin critical events or errors across client and server sessions.
+- 📊 **Web Dashboard**: Interactive web dashboard (`/logs`) for inspecting, searching, filtering, and exporting log history from any browser.
+- ⌨️ **Terminal UI (TUI)**: Live interactive terminal view with fast keyboard shortcuts (`c` to copy script URL, `t` to copy script tag, `p` to pause stream, `q` to quit).
+- 🗄️ **Persistent Local Storage**: Automatically saves logs to a local database with configurable retention limits (`--max-logs`).
+- 🔑 **Token Authentication**: Optional Bearer token security for restricted environment logging.
+- 🛡️ **Zero-Dependency Client Script**: Drop-in `/script/client.js` with automatic circular reference handling, session tracking, and offline queueing.
+- ⚙️ **Custom Configuration**: Flexible global configuration file support (`~/.reverse-logger/config.json`).
 
 ## Installation & Quick Start
 
@@ -42,6 +43,39 @@ Or install globally:
 npm install -g reverse-logger
 reverse-logger serve
 ```
+
+## 🌟 Best Recommended Usage & Debugging Workflow
+
+### Step 1: Start Server
+```bash
+npx reverse-logger serve --port 5050
+```
+
+### Step 2: Inject Client Script
+Add to your web application HTML:
+```html
+<script src="http://localhost:5050/script/client.js"></script>
+```
+
+### Step 3: Write Minimal Tagged Console Logs
+Use native `console` functions prefixed with `"RLogger | "` to keep code zero-dependency and easy to remove:
+```javascript
+console.log("RLogger | Route navigate", { from: "/home", to: "/checkout" });
+console.warn("RLogger | Payment retry", { attempt: 2 });
+console.error("RLogger | Cart sync failed", err);
+
+// Pin milestones with the public star API
+window.reverseLogger?.star("Checkout Completed", { orderId: "ORD-9912" });
+```
+
+### Step 4: Access & Inspect Logs (4 Interfaces)
+- 🎨 **Browser Overlay**: Press **`Cmd/Ctrl + Shift + L`** on your web page. Search `"RLogger"` or expand entries.
+- ⌨️ **Terminal UI**: Press `1`-`5` to filter levels, `p` to pause/resume live stream.
+- 📊 **Web Dashboard**: Visit `http://localhost:5050/logs` for full log browsing, search, and export.
+- 🤖 **REST API (CLI / AI Agents)**: Query programmatically via `curl "http://localhost:5050/api/logs?q=RLogger"`.
+
+### Step 5: 1-Click Cleanup
+Remove debug statements before release with a single search: `grep -rn "RLogger | " src/`
 
 ## Public Browser API (`window.reverseLogger`)
 
@@ -73,7 +107,7 @@ Press **`Cmd + Shift + L`** (macOS) or **`Ctrl + Shift + L`** (Windows/Linux) to
 
 Open `http://<server-ip>:<port>/logs` in any browser to access the interactive web dashboard:
 - **Tabs**: `All Logs`, `⭐ Starred`, `⚠️ Errors`
-- **Features**: Full text search, level selector, pagination, detailed argument inspector, star/unstar toggle, and copy as JSON/text.
+- **Features**: Full text search, level selector, pagination, detailed argument inspector, star/unstar toggle, on-demand large payload loading, and copy as JSON/text.
 
 ## CLI Usage & Options
 
@@ -116,7 +150,7 @@ interface LogEntry {
   id: number;
   timestamp: string;     // ISO 8601 string
   level: string;         // "log" | "info" | "warn" | "error" | "debug" | "special"
-  message: string;       // Primary text representation of arguments
+  message: string;       // Primary text representation of arguments (or truncated preview if large)
   args: unknown[];       // Raw arguments array
   url?: string;          // Origin page URL
   stack?: string;        // Error stack trace (if available)
@@ -125,6 +159,8 @@ interface LogEntry {
   starred: boolean;      // True if starred/important
   source?: "console" | "reverseLogger"; // Log origin source
   createdAt?: string;    // Server ingestion timestamp
+  isLarge?: boolean;     // True if payload > 32KB stored in tiered storage
+  payloadSize?: number;  // Total size in bytes of log payload
 }
 ```
 
@@ -147,16 +183,23 @@ GET /api/logs/starred
 ```
 Alias for `GET /api/logs?starred=true`.
 
-### 4. Toggle Starred State
+### 4. Fetch Full Payload for Large Logs (>32KB)
+```text
+GET /api/logs/:id/payload
+```
+Returns `{ success: true, payload: { logId, message, args, stack, payloadSize } }`.
+
+### 5. Toggle Starred State
 ```text
 POST /api/logs/:id/star
 ```
 Payload: `{ "starred": true }` or `{ "starred": false }`. Toggles state if body is empty.
 
-### 5. Ingest Log Entry
+### 6. Ingest Log Entries (Single or Batch)
 ```text
 POST /api/logs
 ```
+Payload: Single `LogEntry` object OR batch array `{ "logs": [ ... ] }` / `[ ... ]`. Maximum HTTP body payload size: 20MB.
 
 ## Running Tests
 
