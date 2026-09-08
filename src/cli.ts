@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Command } from 'commander';
 import React from 'react';
 import { render } from 'ink';
@@ -43,13 +44,6 @@ program
       const scriptUrl = `${serverUrl}/script/client.js${scriptTokenParam}`;
       const scriptTag = `<script src="${scriptUrl}"></script>`;
 
-      // Print plain text banner to stdout before Ink TUI for standard terminal mouse selection
-      console.log('Reverse Logger\n');
-      console.log(`Server : ${serverUrl}`);
-      console.log(`Script : ${scriptUrl}\n`);
-      console.log('Tag:');
-      console.log(`${scriptTag}\n`);
-
       const server = createServer({
         port,
         host,
@@ -65,6 +59,9 @@ program
         React.createElement(App, {
           serverUrl,
           scriptUrl,
+          dashboardUrl: `${serverUrl}/logs`,
+          dbPath: resolvedConfig.dbPath,
+          flush: resolvedConfig.flush,
           maxLogs: resolvedConfig.maxLogs || 10000,
           db: server.db,
           events: server.events,
