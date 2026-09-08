@@ -12,7 +12,7 @@
 - **tsup**: Bundler creating Node CLI (`dist/cli.mjs`), dual CJS/ESM library (`dist/index.cjs`, `dist/index.js`), and standalone browser client (`dist/client.js`).
 - **Changesets**: Versioning & changelog setup (`.changeset/config.json`).
 - **Config loader**: Support for default configurations in `~/.reverse-logger/config.json` (`maxLogs`, `port`, `host`, `token`, `dbPath`).
-- **Browser Developer Overlay**: Lightweight Shadow DOM overlay injected by `client.js` with floating badge (`RL 12 ⚠ 2 ✕ 1`), real-time log list, search, level filters, expandable log details, copy buttons, star/unstar toggle, `requestAnimationFrame`-throttled UI updates (to safely handle 1,000+ logs without freezing the main thread or unresponding badge), and `Cmd/Ctrl+Shift+L` keyboard shortcut.
+- **Browser Developer Overlay**: Lightweight Shadow DOM overlay injected by `client.js` with floating badge (`RL 12 ⚠ 2 ✕ 1`), real-time log list, search, level filters, expandable log details, copy buttons, star/unstar toggle, ultra-fast single-pass zero-`JSON.parse` serializer (`fastSerialize`), synthetic stack trace restriction (only on errors/starred logs), 250ms buffered network queue flushes, `requestAnimationFrame`-throttled UI updates (safely handling 1,000+ logs/3s without freezing the main thread or impacting client app performance), and `Cmd/Ctrl+Shift+L` keyboard shortcut.
 - **Public Browser API**: `window.reverseLogger` exposing `log`, `info`, `warn`, `error`, `debug`, `star` (special logs), `clear`, `pause`, `resume`, `isConnected`.
 
 ## Key Commands
