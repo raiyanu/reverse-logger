@@ -1,4 +1,4 @@
-# Reverse Logger ⚡
+# Reverse Logger ⚡ — Runtime Observability for Developers & AI Coding Agents
 
 > Production-ready local reverse logger server that receives browser console logs and displays/stores them in a live terminal UI, standalone browser developer overlay, and web dashboard with SQLite database.
 
